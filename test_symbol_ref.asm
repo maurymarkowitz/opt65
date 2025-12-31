@@ -1,0 +1,2 @@
+HMADR    EQU     $2E5
+HIMEM    EQU     HMADR

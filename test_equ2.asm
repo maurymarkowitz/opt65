@@ -1,0 +1,2 @@
+TEST EQU $42
+LOMEM = $80
