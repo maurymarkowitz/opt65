@@ -45,6 +45,14 @@ char *current_macro_body = NULL;
 int current_macro_body_size = 0;
 int current_macro_body_len = 0;
 
+/* Conditional compilation stack */
+#define MAX_IF_DEPTH 32
+int if_stack[MAX_IF_DEPTH];
+int if_stack_depth = 0;
+
+/* Forward declaration */
+int is_conditional_active(void);
+
 /* Output buffer */
 uint8_t output[65536];
 uint16_t pc = 0;
@@ -79,10 +87,15 @@ void end_macro_definition(void);
 %token ROL ROR RTI RTS SBC SEC SED SEI STA STX STY
 %token TAX TAY TSX TXA TXS TYA
 %token BRA PHX PHY PLX PLY STZ TRB TSB WAI STP
-%token ORG BYTE WORD RES EQU MACRO ENDM PAGE TITLE LIST
+%token ORG BYTE WORD RES EQU MACRO ENDM PAGE TITLE LIST IF ENDIF END
+%token LOW HIGH
+%token AND_OP OR_OP
 %token <sval> MACRO_BODY
 %token HASH LPAREN RPAREN COMMA COLON EQUALS XREG YREG NEWLINE
 %token PLUS MINUS MULTIPLY DIVIDE ORG_EQUALS
+%left PLUS MINUS
+%left MULTIPLY DIVIDE AND_OP OR_OP
+%right UMINUS
 
 %type <sval> expression
 %type <ival> expr_value
@@ -108,23 +121,65 @@ line:
     | LIST IDENTIFIER NEWLINE { /* List directive - no-op */ }
     | macro_start
     | macro_invocation
+    | if_block
+    | endif_directive
+    ;
+
+if_block:
+    IF expr_value NEWLINE {
+        int condition = $2 != 0;
+        if (if_stack_depth >= MAX_IF_DEPTH) {
+            fprintf(stderr, "Error: IF nesting too deep at line %d\n", yylineno);
+        } else {
+            if_stack[if_stack_depth++] = condition ? 1 : 0;
+        }
+    }
+    ;
+
+endif_directive:
+    ENDIF NEWLINE {
+        if (if_stack_depth == 0) {
+            fprintf(stderr, "Error: ENDIF without matching IF at line %d\n", yylineno);
+        } else {
+            if_stack_depth--;
+        }
+    }
     ;
 
 label:
     IDENTIFIER COLON
     {
-        add_symbol($1, pc);
+        if (is_conditional_active()) {
+            add_symbol($1, pc);
+        }
     }
     ;
 
 assignment:
-    IDENTIFIER EQU expr_value { add_symbol($1, $3); }
-    | IDENTIFIER EQUALS expr_value { add_symbol($1, $3); }
-    | IDENTIFIER EQUALS MULTIPLY { add_symbol($1, pc); }  /* =* location counter */
+    IDENTIFIER EQU expr_value { 
+        if (is_conditional_active()) {
+            add_symbol($1, $3); 
+        }
+    }
+    | IDENTIFIER EQUALS expr_value { 
+        if (is_conditional_active()) {
+            add_symbol($1, $3); 
+        }
+    }
+    | IDENTIFIER EQUALS MULTIPLY { 
+        if (is_conditional_active()) {
+            add_symbol($1, pc); 
+        }
+    }  /* =* location counter */
     ;
 
 org_equals:
-    ORG_EQUALS expr_value { org_address = $2; pc = org_address; }
+    ORG_EQUALS expr_value { 
+        if (is_conditional_active()) {
+            org_address = $2; 
+            pc = org_address; 
+        }
+    }
     ;
 
 instruction:
@@ -162,7 +217,75 @@ implied_instruction:
     }
     | PLP { emit_opcode(0x28); }
     | RTI { emit_opcode(0x40); }
+    | RTI IDENTIFIER { emit_opcode(0x40); }  /* Allow optional label annotation */
     | RTS { emit_opcode(0x60); }
+    | RTS IDENTIFIER { emit_opcode(0x60); }  /* Allow optional label annotation like RTS RETURN */
+    | RTS ADC { emit_opcode(0x60); }  /* Ignore any token after RTS */
+    | RTS AND { emit_opcode(0x60); }  /* Ignore any token after RTS */
+    | RTS ASL { emit_opcode(0x60); }
+    | RTS BCC { emit_opcode(0x60); }
+    | RTS BCS { emit_opcode(0x60); }
+    | RTS BEQ { emit_opcode(0x60); }
+    | RTS BIT { emit_opcode(0x60); }
+    | RTS BMI { emit_opcode(0x60); }
+    | RTS BNE { emit_opcode(0x60); }
+    | RTS BPL { emit_opcode(0x60); }
+    | RTS BRK { emit_opcode(0x60); }
+    | RTS BVC { emit_opcode(0x60); }
+    | RTS BVS { emit_opcode(0x60); }
+    | RTS CLC { emit_opcode(0x60); }
+    | RTS CLD { emit_opcode(0x60); }
+    | RTS CLI { emit_opcode(0x60); }
+    | RTS CLV { emit_opcode(0x60); }
+    | RTS CMP { emit_opcode(0x60); }
+    | RTS CPX { emit_opcode(0x60); }
+    | RTS CPY { emit_opcode(0x60); }
+    | RTS DEC { emit_opcode(0x60); }
+    | RTS DEX { emit_opcode(0x60); }
+    | RTS DEY { emit_opcode(0x60); }
+    | RTS EOR { emit_opcode(0x60); }
+    | RTS INC { emit_opcode(0x60); }
+    | RTS INX { emit_opcode(0x60); }
+    | RTS INY { emit_opcode(0x60); }
+    | RTS JMP { emit_opcode(0x60); }
+    | RTS JSR { emit_opcode(0x60); }
+    | RTS LDA { emit_opcode(0x60); }
+    | RTS LDX { emit_opcode(0x60); }
+    | RTS LDY { emit_opcode(0x60); }
+    | RTS LSR { emit_opcode(0x60); }
+    | RTS NOP { emit_opcode(0x60); }
+    | RTS ORA { emit_opcode(0x60); }
+    | RTS PHA { emit_opcode(0x60); }
+    | RTS PHP { emit_opcode(0x60); }
+    | RTS PLA { emit_opcode(0x60); }
+    | RTS PLP { emit_opcode(0x60); }
+    | RTS ROL { emit_opcode(0x60); }
+    | RTS ROR { emit_opcode(0x60); }
+    | RTS RTI { emit_opcode(0x60); }
+    | RTS RTS { emit_opcode(0x60); }
+    | RTS SBC { emit_opcode(0x60); }
+    | RTS SEC { emit_opcode(0x60); }
+    | RTS SED { emit_opcode(0x60); }
+    | RTS SEI { emit_opcode(0x60); }
+    | RTS STA { emit_opcode(0x60); }
+    | RTS STX { emit_opcode(0x60); }
+    | RTS STY { emit_opcode(0x60); }
+    | RTS TAX { emit_opcode(0x60); }
+    | RTS TAY { emit_opcode(0x60); }
+    | RTS TSX { emit_opcode(0x60); }
+    | RTS TXA { emit_opcode(0x60); }
+    | RTS TXS { emit_opcode(0x60); }
+    | RTS TYA { emit_opcode(0x60); }
+    | RTS BRA { emit_opcode(0x60); }
+    | RTS PHX { emit_opcode(0x60); }
+    | RTS PHY { emit_opcode(0x60); }
+    | RTS PLX { emit_opcode(0x60); }
+    | RTS PLY { emit_opcode(0x60); }
+    | RTS STZ { emit_opcode(0x60); }
+    | RTS TRB { emit_opcode(0x60); }
+    | RTS TSB { emit_opcode(0x60); }
+    | RTS WAI { emit_opcode(0x60); }
+    | RTS STP { emit_opcode(0x60); }
     | SEC { emit_opcode(0x38); }
     | SED { emit_opcode(0xF8); }
     | SEI { emit_opcode(0x78); }
@@ -184,9 +307,37 @@ implied_instruction:
 
 accumulator_instruction:
     ASL { emit_opcode(0x0A); }
+    | ASL IDENTIFIER { 
+        if (strcasecmp($2, "A") == 0) {
+            emit_opcode(0x0A);  /* ASL A is same as ASL */
+        } else {
+            fprintf(stderr, "Error: ASL accumulator instruction cannot take operand '%s' at line %d\n", $2, yylineno);
+        }
+    }
     | LSR { emit_opcode(0x4A); }
+    | LSR IDENTIFIER { 
+        if (strcasecmp($2, "A") == 0) {
+            emit_opcode(0x4A);  /* LSR A is same as LSR */
+        } else {
+            fprintf(stderr, "Error: LSR accumulator instruction cannot take operand '%s' at line %d\n", $2, yylineno);
+        }
+    }
     | ROL { emit_opcode(0x2A); }
+    | ROL IDENTIFIER { 
+        if (strcasecmp($2, "A") == 0) {
+            emit_opcode(0x2A);  /* ROL A is same as ROL */
+        } else {
+            fprintf(stderr, "Error: ROL accumulator instruction cannot take operand '%s' at line %d\n", $2, yylineno);
+        }
+    }
     | ROR { emit_opcode(0x6A); }
+    | ROR IDENTIFIER { 
+        if (strcasecmp($2, "A") == 0) {
+            emit_opcode(0x6A);  /* ROR A is same as ROR */
+        } else {
+            fprintf(stderr, "Error: ROR accumulator instruction cannot take operand '%s' at line %d\n", $2, yylineno);
+        }
+    }
     ;
 
 immediate_instruction:
@@ -593,13 +744,44 @@ c02_instruction:
 directive:
     ORG expression { org_address = eval_expr($2); pc = org_address; }
     | ORG_EQUALS expression { org_address = eval_expr($2); pc = org_address; }
-    | BYTE expression { emit_byte(eval_expr($2) & 0xFF); }
-    | WORD expression { emit_word(eval_expr($2)); }
+    | BYTE byte_list { /* byte_list handles emitting */ }
+    | WORD word_list { /* word_list handles emitting */ }
     | RES expression { pc += eval_expr($2); }
     | EQU expression { /* .EQU handled in assignment rule */ }
     | PAGE { /* Page break - no-op */ }
     | TITLE { /* Title directive - no-op, ignore the string (handled as any expression) */ }
     | LIST { /* List directive - no-op, ignore the parameter */ }
+    | LIST IDENTIFIER { /* List directive with parameter - no-op, ignore parameter */ }
+    | LIST XREG { /* List directive with X parameter - no-op, ignore parameter */ }
+    | LIST YREG { /* List directive with Y parameter - no-op, ignore parameter */ }
+    | LIST expression { /* List directive with expression - no-op, ignore parameter */ }
+    | END { YYACCEPT; }  /* End of file - stop parsing */
+    ;
+
+byte_list:
+    expression { 
+        if (is_conditional_active()) {
+            emit_byte(eval_expr($1) & 0xFF); 
+        }
+    }
+    | byte_list COMMA expression { 
+        if (is_conditional_active()) {
+            emit_byte(eval_expr($3) & 0xFF); 
+        }
+    }
+    ;
+
+word_list:
+    expression { 
+        if (is_conditional_active()) {
+            emit_word(eval_expr($1)); 
+        }
+    }
+    | word_list COMMA expression { 
+        if (is_conditional_active()) {
+            emit_word(eval_expr($3)); 
+        }
+    }
     ;
 
 macro_start:
@@ -663,6 +845,33 @@ expression:
         snprintf(result, 16, "%d", pc);
         $$ = result;
     }
+    | LOW IDENTIFIER {
+        /* Extract low byte of address */
+        uint16_t addr = eval_expr($2);
+        uint8_t low_byte = addr & 0xFF;
+        char *result = malloc(16);
+        snprintf(result, 16, "$%02X", low_byte);
+        $$ = result;
+    }
+    | HIGH IDENTIFIER {
+        /* Extract high byte of address */
+        uint16_t addr = eval_expr($2);
+        uint8_t high_byte = (addr >> 8) & 0xFF;
+        char *result = malloc(16);
+        snprintf(result, 16, "$%02X", high_byte);
+        $$ = result;
+    }
+    | MINUS expression { 
+        uint16_t val = eval_expr($2);
+        int16_t neg_val = -(int16_t)val;
+        /* For 8-bit values, we want the two's complement */
+        uint8_t byte_val = (uint8_t)neg_val;
+        char *result = malloc(16);
+        /* Always format as hex for immediate values to ensure eval_expr can parse it */
+        snprintf(result, 16, "$%02X", byte_val);
+        $$ = result;
+    }
+    | PLUS expression { $$ = $2; }  /* Unary plus (no-op) */
     | expression PLUS expression { 
         uint16_t left = eval_expr($1);
         uint16_t right = eval_expr($3);
@@ -695,6 +904,32 @@ expression:
         snprintf(result, 16, "%d", left / right);
         $$ = result;
     }
+    | expression AND_OP expression {
+        uint16_t left = eval_expr($1);
+        uint16_t right = eval_expr($3);
+        uint16_t result_val = left & right;
+        char *result = malloc(16);
+        /* Format as hex if either operand was hex */
+        if ((strlen($1) > 0 && $1[0] == '$') || (strlen($3) > 0 && $3[0] == '$')) {
+            snprintf(result, 16, "$%02X", result_val & 0xFF);
+        } else {
+            snprintf(result, 16, "%d", result_val);
+        }
+        $$ = result;
+    }
+    | expression OR_OP expression {
+        uint16_t left = eval_expr($1);
+        uint16_t right = eval_expr($3);
+        uint16_t result_val = left | right;
+        char *result = malloc(16);
+        /* Format as hex if either operand was hex */
+        if ((strlen($1) > 0 && $1[0] == '$') || (strlen($3) > 0 && $3[0] == '$')) {
+            snprintf(result, 16, "$%02X", result_val & 0xFF);
+        } else {
+            snprintf(result, 16, "%d", result_val);
+        }
+        $$ = result;
+    }
     | LPAREN expression RPAREN { $$ = $2; }
     ;
 
@@ -703,6 +938,18 @@ expr_value:
     | HEX_NUMBER { $$ = eval_expr($1); }
     | DEC_NUMBER { $$ = eval_expr($1); }
     | MULTIPLY { $$ = pc; }  /* Current location counter */
+    | LOW IDENTIFIER {
+        /* Extract low byte of address */
+        uint16_t addr = eval_expr($2);
+        $$ = addr & 0xFF;
+    }
+    | HIGH IDENTIFIER {
+        /* Extract high byte of address */
+        uint16_t addr = eval_expr($2);
+        $$ = (addr >> 8) & 0xFF;
+    }
+    | MINUS expr_value %prec UMINUS { $$ = -$2; }  /* Unary minus */
+    | PLUS expr_value { $$ = $2; }  /* Unary plus (no-op) */
     | expr_value PLUS expr_value { $$ = $1 + $3; }
     | expr_value MINUS expr_value { $$ = $1 - $3; }
     | expr_value MULTIPLY expr_value { $$ = $1 * $3; }
@@ -713,6 +960,12 @@ expr_value:
         } else {
             $$ = $1 / $3;
         }
+    }
+    | expr_value AND_OP expr_value {
+        $$ = $1 & $3;
+    }
+    | expr_value OR_OP expr_value {
+        $$ = $1 | $3;
     }
     | LPAREN expr_value RPAREN { $$ = $2; }
     ;
@@ -741,6 +994,7 @@ uint16_t eval_expr(char *expr) {
 }
 
 void add_symbol(char *name, uint16_t value) {
+    if (!is_conditional_active()) return;  /* Skip if in false conditional block */
     if (symbol_count >= MAX_SYMBOLS) {
         fprintf(stderr, "Error: Too many symbols\n");
         return;
@@ -766,11 +1020,22 @@ uint16_t get_symbol(char *name) {
         }
     }
     
-    fprintf(stderr, "Warning: Undefined symbol '%s', assuming 0\n", name);
+    fprintf(stderr, "Warning: Undefined symbol '%s' at line %d, assuming 0\n", name, yylineno);
     return 0;
 }
 
+int is_conditional_active(void) {
+    /* If we're in any false conditional block, return 0 */
+    for (int i = 0; i < if_stack_depth; i++) {
+        if (if_stack[i] == 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
 void emit_byte(uint8_t byte) {
+    if (!is_conditional_active()) return;  /* Skip if in false conditional block */
     if (pc >= 65536) {
         fprintf(stderr, "Error: Program counter overflow\n");
         return;
@@ -780,6 +1045,7 @@ void emit_byte(uint8_t byte) {
 }
 
 void emit_opcode(uint8_t opcode) {
+    if (!is_conditional_active()) return;  /* Skip if in false conditional block */
     stats_record_opcode(opcode);
     emit_byte(opcode);
 }

@@ -11,6 +11,9 @@ extern uint8_t output[65536];
 extern uint16_t pc;
 extern uint16_t org_address;
 extern int yyparse(void);
+extern int yylex(void);
+extern char *yytext;
+extern int yylineno;
 extern FILE *yyin;
 
 void print_usage(const char *progname) {
@@ -117,7 +120,7 @@ int main(int argc, char *argv[]) {
     yyfilename = input_file;
     
     if (yyparse() != 0) {
-        fprintf(stderr, "Parse error\n");
+        fprintf(stderr, "Parse error: %s at line %d\n", yytext, yylineno);
         fclose(input);
         return 1;
     }
