@@ -345,7 +345,10 @@ immediate_instruction:
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0x69); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("ADC #0", 0x69, $3);
+        if (val == 0) {
+            check_zero_transfer("ADC #0", 0x69, $3);
+            stats_record_immediate_zero(0x69);
+        }
         extern char *yyfilename;
         stats_record_instruction(0x69, "ADC", val, yylineno, yyfilename, NULL);
     }
@@ -353,7 +356,10 @@ immediate_instruction:
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0x29); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("AND #0", 0x29, $3);
+        if (val == 0) {
+            check_zero_transfer("AND #0", 0x29, $3);
+            stats_record_immediate_zero(0x29);
+        }
         extern char *yyfilename;
         stats_record_instruction(0x29, "AND", val, yylineno, yyfilename, NULL);
     }
@@ -361,51 +367,75 @@ immediate_instruction:
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0xC9); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("CMP #0", 0xC9, $3);
+        if (val == 0) {
+            check_zero_transfer("CMP #0", 0xC9, $3);
+            stats_record_immediate_zero(0xC9);
+        }
     }
     | CPX HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0xE0); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("CPX #0", 0xE0, $3);
+        if (val == 0) {
+            check_zero_transfer("CPX #0", 0xE0, $3);
+            stats_record_immediate_zero(0xE0);
+        }
     }
     | CPY HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0xC0); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("CPY #0", 0xC0, $3);
+        if (val == 0) {
+            check_zero_transfer("CPY #0", 0xC0, $3);
+            stats_record_immediate_zero(0xC0);
+        }
     }
     | EOR HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0x49); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("EOR #0", 0x49, $3);
+        if (val == 0) {
+            check_zero_transfer("EOR #0", 0x49, $3);
+            stats_record_immediate_zero(0x49);
+        }
     }
     | LDA HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0xA9); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("LDA #0", 0xA9, $3);
+        if (val == 0) {
+            check_zero_transfer("LDA #0", 0xA9, $3);
+            stats_record_immediate_zero(0xA9);
+        }
         extern char *yyfilename;
-        stats_record_instruction(0xA9, "LDA", val, yylineno, yyfilename, NULL);
+        stats_record_instruction(0xA9, "LDA", val, yylineno, yyfilename, $3);
     }
     | LDX HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0xA2); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("LDX #0", 0xA2, $3);
+        if (val == 0) {
+            check_zero_transfer("LDX #0", 0xA2, $3);
+            stats_record_immediate_zero(0xA2);
+        }
     }
     | LDY HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0xA0); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("LDY #0", 0xA0, $3);
+        if (val == 0) {
+            check_zero_transfer("LDY #0", 0xA0, $3);
+            stats_record_immediate_zero(0xA0);
+        }
     }
     | ORA HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0x09); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("ORA #0", 0x09, $3);
+        if (val == 0) {
+            check_zero_transfer("ORA #0", 0x09, $3);
+            stats_record_immediate_zero(0x09);
+        }
         extern char *yyfilename;
         stats_record_instruction(0x09, "ORA", val, yylineno, yyfilename, NULL);
     }
@@ -413,7 +443,10 @@ immediate_instruction:
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0xE9); 
         emit_byte(val);
-        if (val == 0) check_zero_transfer("SBC #0", 0xE9, $3);
+        if (val == 0) {
+            check_zero_transfer("SBC #0", 0xE9, $3);
+            stats_record_immediate_zero(0xE9);
+        }
         extern char *yyfilename;
         stats_record_instruction(0xE9, "SBC", val, yylineno, yyfilename, NULL);
     }
@@ -506,7 +539,10 @@ address_instruction:
     | STA expression { 
         uint16_t addr = eval_expr($2);
         emit_addr(0x85, 0x8D, $2);
-        if (addr == 0) check_zero_transfer("STA $00", 0x85, $2);
+        if (addr == 0) {
+            check_zero_transfer("STA $00", 0x85, $2);
+            stats_record_sta_zero();
+        }
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0x85 : 0x8D;
         stats_record_instruction(op, "STA", addr, yylineno, yyfilename, NULL);

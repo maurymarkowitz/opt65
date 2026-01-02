@@ -10,7 +10,10 @@
 #define MAX_INSTR_HISTORY 10
 
 static int opcode_counts[NUM_OPCODES];
+static int immediate_zero_counts[NUM_OPCODES];
 static int total_opcodes = 0;
+static int total_immediate_zero = 0;
+static int sta_zero_count = 0;
 static int c02_opcode_count = 0;
 static char *current_filename = NULL;
 static int binary_size = 0;
@@ -108,7 +111,10 @@ static const uint8_t c02_opcodes[] = {
 
 void stats_init(void) {
     memset(opcode_counts, 0, sizeof(opcode_counts));
+    memset(immediate_zero_counts, 0, sizeof(immediate_zero_counts));
     total_opcodes = 0;
+    total_immediate_zero = 0;
+    sta_zero_count = 0;
     zero_transfer_count = 0;
     c02_opcode_count = 0;
     instr_history_count = 0;
@@ -134,6 +140,15 @@ void stats_record_opcode(uint8_t opcode) {
     if (stats_is_c02_opcode(opcode)) {
         c02_opcode_count++;
     }
+}
+
+void stats_record_immediate_zero(uint8_t opcode) {
+    immediate_zero_counts[opcode]++;
+    total_immediate_zero++;
+}
+
+void stats_record_sta_zero(void) {
+    sta_zero_count++;
 }
 
 void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t operand, int line_num, const char *filename, const char *expression) {
@@ -167,7 +182,20 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
             instr_history_t *prev = &instr_history[instr_history_count - 2];
             instr_history_t *curr = &instr_history[instr_history_count - 1];
             
-            if (prev->opcode == 0xA9 && prev->operand == 0 && 
+            /* Check if LDA has explicit #0 or #$0 (not just a symbol that evaluates to zero) */
+            int is_explicit_zero = 0;
+            if (prev->opcode == 0xA9 && prev->operand == 0 && prev->expression[0] != '\0') {
+                /* Check if expression is explicitly 0, $0, $00 (the # is a separate token) */
+                const char *expr = prev->expression;
+                /* Expression for immediate instructions will be "0", "$0", "$00", etc. (without #) */
+                if (strcmp(expr, "0") == 0 || 
+                    strcmp(expr, "$0") == 0 || 
+                    strcmp(expr, "$00") == 0) {
+                    is_explicit_zero = 1;
+                }
+            }
+            
+            if (prev->opcode == 0xA9 && is_explicit_zero && 
                 (curr->opcode == 0x85 || curr->opcode == 0x8D || 
                  curr->opcode == 0x95 || curr->opcode == 0x9D)) {
                 /* LDA #0 followed by STA -> STZ */
@@ -508,25 +536,38 @@ void stats_print_report(void) {
     
     printf("========================\n");
     
-    /* Print zero transfer statistics */
-    if (zero_transfer_count > 0) {
-        printf("\n=== Zero Constant Transfers ===\n");
-        printf("Total zero transfers: %d\n\n", zero_transfer_count);
-        
-        for (int i = 0; i < zero_transfer_count; i++) {
-            zero_transfer_t *zt = &zero_transfers[i];
-            if (zt->is_register) {
-                printf("  %s -> register\n", zt->instruction);
-            } else {
-                if (zt->address < 256) {
-                    printf("  %s -> memory ($%02X)\n", zt->instruction, zt->address);
-                } else {
-                    printf("  %s -> memory ($%04X)\n", zt->instruction, zt->address);
+        /* Print immediate zero statistics */
+        if (total_immediate_zero > 0 || sta_zero_count > 0) {
+            printf("\n=== Immediate Zero Opcodes ===\n");
+            printf("Total immediate zero opcodes: %d", total_immediate_zero);
+            if (sta_zero_count > 0) {
+                printf(" (plus %d STA $00)", sta_zero_count);
+            }
+            printf("\n\n");
+            
+            int found_any = 0;
+            for (int i = 0; i < NUM_OPCODES; i++) {
+                if (immediate_zero_counts[i] > 0) {
+                    found_any = 1;
+                    const char *name = opcode_names[i];
+                    if (name) {
+                        printf("$%02X (%s): %d\n", i, name, immediate_zero_counts[i]);
+                    } else {
+                        printf("$%02X (unknown): %d\n", i, immediate_zero_counts[i]);
+                    }
                 }
             }
+            
+            if (sta_zero_count > 0) {
+                found_any = 1;
+                printf("STA $00: %d\n", sta_zero_count);
+            }
+            
+            if (!found_any) {
+                printf("No immediate zero opcodes were emitted.\n");
+            }
+            printf("==============================\n");
         }
-        printf("================================\n");
-    }
     
     /* Print replacement opportunities */
     if (replacement_count > 0) {
@@ -638,11 +679,37 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
         
         printf("========================\n");
         
-        /* Print zero transfer statistics */
-        if (zero_transfer_count > 0) {
-            printf("\n=== Zero Constant Transfers ===\n");
-            printf("Total zero transfers: %d\n", zero_transfer_count);
-            printf("================================\n");
+        /* Print immediate zero statistics */
+        if (total_immediate_zero > 0 || sta_zero_count > 0) {
+            printf("\n=== Immediate Zero Opcodes ===\n");
+            printf("Total immediate zero opcodes: %d", total_immediate_zero);
+            if (sta_zero_count > 0) {
+                printf(" (plus %d STA $00)", sta_zero_count);
+            }
+            printf("\n\n");
+            
+            int found_any = 0;
+            for (int i = 0; i < NUM_OPCODES; i++) {
+                if (immediate_zero_counts[i] > 0) {
+                    found_any = 1;
+                    const char *name = opcode_names[i];
+                    if (name) {
+                        printf("$%02X (%s): %d\n", i, name, immediate_zero_counts[i]);
+                    } else {
+                        printf("$%02X (unknown): %d\n", i, immediate_zero_counts[i]);
+                    }
+                }
+            }
+            
+            if (sta_zero_count > 0) {
+                found_any = 1;
+                printf("STA $00: %d\n", sta_zero_count);
+            }
+            
+            if (!found_any) {
+                printf("No immediate zero opcodes were emitted.\n");
+            }
+            printf("==============================\n");
         }
         
         /* Print replacement count summary */

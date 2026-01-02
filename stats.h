@@ -9,6 +9,12 @@ void stats_init(void);
 /* Record an opcode being emitted */
 void stats_record_opcode(uint8_t opcode);
 
+/* Record an immediate opcode with zero parameter */
+void stats_record_immediate_zero(uint8_t opcode);
+
+/* Record a STA instruction storing to address 0 */
+void stats_record_sta_zero(void);
+
 /* Print statistics report */
 void stats_print_report(void);
 
