@@ -121,6 +121,8 @@
 "\.OR\."|"OR\."       { return OR_OP; }
 
  /* operators / punctuation */
+"<"     { return LT; }  /* Low byte operator, same as .LOW. */
+">"     { return GT; }  /* High byte operator, same as .HIGH. */
 "#"     { return HASH; }
 "("     { return LPAREN; }
 ")"     { return RPAREN; }

@@ -96,6 +96,7 @@ void end_macro_definition(void);
 %token BRA PHX PHY PLX PLY STZ TRB TSB WAI STP
 %token ORG BYTE WORD RES EQU MACRO ENDM PAGE TITLE LIST IF ENDIF END
 %token LOW HIGH
+%token LT GT  /* < and > as alternatives to .LOW. and .HIGH. */
 %token AND_OP OR_OP
 %token <sval> MACRO_BODY
 %token HASH LPAREN RPAREN COMMA COLON EQUALS XREG YREG NEWLINE
@@ -131,12 +132,16 @@ line:
     | if_block
     | endif_directive
     | END { 
+        extern void stats_record_instruction_size(void);
+        stats_record_instruction_size();  /* Record size of last instruction */
         if (pass == 2) {
             YYACCEPT;  /* End of file - stop parsing in pass 2 only */
         }
         /* In pass 1, continue to build complete symbol table */
     }
     | END NEWLINE { 
+        extern void stats_record_instruction_size(void);
+        stats_record_instruction_size();  /* Record size of last instruction */
         if (pass == 2) {
             YYACCEPT;  /* End of file - stop parsing in pass 2 only */
         }
@@ -987,8 +992,24 @@ expression:
         snprintf(result, 16, "$%02X", low_byte);
         $$ = result;
     }
+    | LT IDENTIFIER {
+        /* Extract low byte of address (same as .LOW.) */
+        uint16_t addr = eval_expr($2);
+        uint8_t low_byte = addr & 0xFF;
+        char *result = malloc(16);
+        snprintf(result, 16, "$%02X", low_byte);
+        $$ = result;
+    }
     | HIGH IDENTIFIER {
         /* Extract high byte of address */
+        uint16_t addr = eval_expr($2);
+        uint8_t high_byte = (addr >> 8) & 0xFF;
+        char *result = malloc(16);
+        snprintf(result, 16, "$%02X", high_byte);
+        $$ = result;
+    }
+    | GT IDENTIFIER {
+        /* Extract high byte of address (same as .HIGH.) */
         uint16_t addr = eval_expr($2);
         uint8_t high_byte = (addr >> 8) & 0xFF;
         char *result = malloc(16);
@@ -1077,8 +1098,18 @@ expr_value:
         uint16_t addr = eval_expr($2);
         $$ = addr & 0xFF;
     }
+    | LT IDENTIFIER {
+        /* Extract low byte of address (same as .LOW.) */
+        uint16_t addr = eval_expr($2);
+        $$ = addr & 0xFF;
+    }
     | HIGH IDENTIFIER {
         /* Extract high byte of address */
+        uint16_t addr = eval_expr($2);
+        $$ = (addr >> 8) & 0xFF;
+    }
+    | GT IDENTIFIER {
+        /* Extract high byte of address (same as .HIGH.) */
         uint16_t addr = eval_expr($2);
         $$ = (addr >> 8) & 0xFF;
     }
@@ -1188,7 +1219,9 @@ void emit_byte(uint8_t byte) {
 
 void emit_opcode(uint8_t opcode) {
     if (!is_conditional_active()) return;  /* Skip if in false conditional block */
-    stats_record_opcode(opcode);
+    extern void stats_record_instruction_size(void);
+    stats_record_instruction_size();  /* Record size of previous instruction before starting new one */
+    stats_record_opcode(opcode);  /* This records the current PC as the start of the new instruction */
     if (pass == 2) {
         /* Track opcode address range */
         if (pc < min_opcode_address) min_opcode_address = pc;
