@@ -39,10 +39,16 @@ typedef struct {
     char old_code[64];
     char new_code[64];
     int bytes_saved;  /* Number of bytes saved by this replacement */
+    uint16_t instr_addr;  /* Address of the instruction (for BRA replacements) */
+    uint16_t target_addr;  /* Target address (for BRA replacements) */
 } replacement_t;
 
 static replacement_t replacements[MAX_REPLACEMENTS];
 static int replacement_count = 0;
+
+/* Optimizations (more complex pattern replacements) */
+static replacement_t optimizations[MAX_REPLACEMENTS];
+static int optimization_count = 0;
 
 /* Zero transfer tracking */
 typedef struct {
@@ -119,8 +125,8 @@ void stats_init(void) {
     c02_opcode_count = 0;
     instr_history_count = 0;
     replacement_count = 0;
-    current_filename = NULL;
-    binary_size = 0;
+    optimization_count = 0;
+    /* Note: current_filename and binary_size are not reset - they're set externally */
 }
 
 void stats_set_binary_size(int size) {
@@ -268,7 +274,40 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                 }
             }
             
-            /* Check for LDA addr; ADC #1; STA addr -> INC addr */
+            /* Simple 65C02 replacements: ADC #1 -> INA, SBC #1 -> DEA */
+            if (instr_history_count >= 1) {
+                instr_history_t *instr = &instr_history[instr_history_count - 1];
+                
+                if (instr->opcode == 0x69 && instr->operand == 1) {
+                    /* ADC #1 -> INA */
+                    if (replacement_count < MAX_REPLACEMENTS) {
+                        replacement_t *r = &replacements[replacement_count];
+                        strcpy(r->type, "INA");
+                        r->line_num = instr->line_num;
+                        strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                        r->filename[sizeof(r->filename) - 1] = '\0';
+                        snprintf(r->old_code, sizeof(r->old_code), "ADC #1");
+                        snprintf(r->new_code, sizeof(r->new_code), "INA");
+                        r->bytes_saved = 1; /* ADC #1 (2 bytes), INA (1 byte), saves 1 */
+                        replacement_count++;
+                    }
+                } else if (instr->opcode == 0xE9 && instr->operand == 1) {
+                    /* SBC #1 -> DEA */
+                    if (replacement_count < MAX_REPLACEMENTS) {
+                        replacement_t *r = &replacements[replacement_count];
+                        strcpy(r->type, "DEA");
+                        r->line_num = instr->line_num;
+                        strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                        r->filename[sizeof(r->filename) - 1] = '\0';
+                        snprintf(r->old_code, sizeof(r->old_code), "SBC #1");
+                        snprintf(r->new_code, sizeof(r->new_code), "DEA");
+                        r->bytes_saved = 1; /* SBC #1 (2 bytes), DEA (1 byte), saves 1 */
+                        replacement_count++;
+                    }
+                }
+            }
+            
+            /* Optimizations: LDA addr; ADC #1; STA addr -> INC addr */
             if (instr_history_count >= 3) {
                 instr_history_t *lda = &instr_history[instr_history_count - 3];
                 instr_history_t *adc = &instr_history[instr_history_count - 2];
@@ -283,8 +322,8 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                              sta->opcode == 0x95 || sta->opcode == 0x9D) &&
                             sta->operand == lda->operand) {
                             /* STA to same address */
-                            if (replacement_count < MAX_REPLACEMENTS) {
-                                replacement_t *r = &replacements[replacement_count];
+                            if (optimization_count < MAX_REPLACEMENTS) {
+                                replacement_t *r = &optimizations[optimization_count];
                                 strcpy(r->type, "INC");
                                 r->line_num = lda->line_num;
                                 strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
@@ -310,20 +349,20 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                                     snprintf(r->new_code, sizeof(r->new_code), "INC $%04X,X", sta->operand);
                                     r->bytes_saved = 5; /* LDA abs,X (3) + ADC #1 (2) + STA abs,X (3) = 8, INC abs,X (3) = 3, saves 5 */
                                 }
-                                replacement_count++;
+                                optimization_count++;
                             }
                         }
                     }
                     
-                    /* Check for LDA addr; SBC #1; STA addr -> DEC addr */
+                    /* Optimizations: LDA addr; SBC #1; STA addr -> DEC addr */
                     if (adc->opcode == 0xE9 && adc->operand == 1) {
                         /* SBC #1 */
                         if ((sta->opcode == 0x85 || sta->opcode == 0x8D ||
                              sta->opcode == 0x95 || sta->opcode == 0x9D) &&
                             sta->operand == lda->operand) {
                             /* STA to same address */
-                            if (replacement_count < MAX_REPLACEMENTS) {
-                                replacement_t *r = &replacements[replacement_count];
+                            if (optimization_count < MAX_REPLACEMENTS) {
+                                replacement_t *r = &optimizations[optimization_count];
                                 strcpy(r->type, "DEC");
                                 r->line_num = lda->line_num;
                                 strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
@@ -349,27 +388,27 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                                     snprintf(r->new_code, sizeof(r->new_code), "DEC $%04X,X", sta->operand);
                                     r->bytes_saved = 5; /* LDA abs,X (3) + SBC #1 (2) + STA abs,X (3) = 8, DEC abs,X (3) = 3, saves 5 */
                                 }
-                                replacement_count++;
+                                optimization_count++;
                             }
                         }
                     }
-                    
                 }
+            }
+            
+            /* Check for TSB: LDA addr; ORA #mask; STA addr -> TSB addr (if mask is power of 2) */
+            if (instr_history_count >= 3) {
+                instr_history_t *lda_tsb = &instr_history[instr_history_count - 3];
+                instr_history_t *ora = &instr_history[instr_history_count - 2];
+                instr_history_t *sta_tsb = &instr_history[instr_history_count - 1];
                 
-                /* Check for TSB: LDA addr; ORA #mask; STA addr -> TSB addr (if mask is power of 2) */
-                if (instr_history_count >= 3) {
-                    instr_history_t *lda_tsb = &instr_history[instr_history_count - 3];
-                    instr_history_t *ora = &instr_history[instr_history_count - 2];
-                    instr_history_t *sta_tsb = &instr_history[instr_history_count - 1];
-                    
-                    if ((lda_tsb->opcode == 0xA5 || lda_tsb->opcode == 0xAD) &&
-                        ora->opcode == 0x09 &&
-                        (sta_tsb->opcode == 0x85 || sta_tsb->opcode == 0x8D) &&
-                        sta_tsb->operand == lda_tsb->operand) {
-                        /* Check if mask is a power of 2 (single bit set) */
-                        uint8_t mask = ora->operand & 0xFF;
-                        if (mask != 0 && (mask & (mask - 1)) == 0) {
-                            if (replacement_count < MAX_REPLACEMENTS) {
+                if ((lda_tsb->opcode == 0xA5 || lda_tsb->opcode == 0xAD) &&
+                    ora->opcode == 0x09 &&
+                    (sta_tsb->opcode == 0x85 || sta_tsb->opcode == 0x8D) &&
+                    sta_tsb->operand == lda_tsb->operand) {
+                    /* Check if mask is a power of 2 (single bit set) */
+                    uint8_t mask = ora->operand & 0xFF;
+                    if (mask != 0 && (mask & (mask - 1)) == 0) {
+                        if (replacement_count < MAX_REPLACEMENTS) {
                                 replacement_t *r = &replacements[replacement_count];
                                 strcpy(r->type, "TSB");
                                 r->line_num = lda_tsb->line_num;
@@ -389,18 +428,18 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                                 replacement_count++;
                             }
                         }
-                    }
-                    
-                    /* Check for TRB: LDA addr; AND #~mask; STA addr -> TRB addr (if mask is power of 2) */
-                    if ((lda_tsb->opcode == 0xA5 || lda_tsb->opcode == 0xAD) &&
-                        ora->opcode == 0x29 &&
-                        (sta_tsb->opcode == 0x85 || sta_tsb->opcode == 0x8D) &&
-                        sta_tsb->operand == lda_tsb->operand) {
-                        /* Check if ~mask is a power of 2 (single bit clear) */
-                        uint8_t and_mask = ora->operand & 0xFF;
-                        uint8_t mask = (~and_mask) & 0xFF;
-                        if (mask != 0 && (mask & (mask - 1)) == 0) {
-                            if (replacement_count < MAX_REPLACEMENTS) {
+                }
+                
+                /* Check for TRB: LDA addr; AND #~mask; STA addr -> TRB addr (if mask is power of 2) */
+                if ((lda_tsb->opcode == 0xA5 || lda_tsb->opcode == 0xAD) &&
+                    ora->opcode == 0x29 &&
+                    (sta_tsb->opcode == 0x85 || sta_tsb->opcode == 0x8D) &&
+                    sta_tsb->operand == lda_tsb->operand) {
+                    /* Check if ~mask is a power of 2 (single bit clear) */
+                    uint8_t and_mask = ora->operand & 0xFF;
+                    uint8_t mask = (~and_mask) & 0xFF;
+                    if (mask != 0 && (mask & (mask - 1)) == 0) {
+                        if (replacement_count < MAX_REPLACEMENTS) {
                                 replacement_t *r = &replacements[replacement_count];
                                 strcpy(r->type, "TRB");
                                 r->line_num = lda_tsb->line_num;
@@ -420,7 +459,6 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                                 replacement_count++;
                             }
                         }
-                    }
                 }
             }
         }
@@ -431,6 +469,7 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
         extern uint16_t pc;
         /* Calculate offset from byte after BRA instruction
          * JMP is at pc-3, BRA would be at pc-3, offset calculated from pc-1 */
+        uint16_t jmp_addr = pc - 3;  /* Address of the JMP instruction */
         int16_t offset = (int16_t)(operand - (pc - 1));
         if (offset >= -128 && offset <= 127) {
             if (replacement_count < MAX_REPLACEMENTS) {
@@ -439,6 +478,8 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                 r->line_num = line_num;
                 strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
                 r->filename[sizeof(r->filename) - 1] = '\0';
+                r->instr_addr = jmp_addr;
+                r->target_addr = operand;
                 
                 /* Use the stored expression if it's a label, otherwise show offset */
                 if (instr_history_count > 0) {
@@ -493,20 +534,48 @@ void stats_print_report(void) {
     printf("\n=== Opcode Statistics ===\n");
     printf("Total opcodes emitted: %d\n\n", total_opcodes);
     
-    int found_any = 0;
+    /* Collect opcodes with counts > 0 and sort by mnemonic */
+    typedef struct {
+        uint8_t opcode;
+        int count;
+        const char *name;
+    } opcode_entry_t;
+    
+    opcode_entry_t entries[256];
+    int entry_count = 0;
+    
     for (int i = 0; i < NUM_OPCODES; i++) {
         if (opcode_counts[i] > 0) {
-            found_any = 1;
-            const char *name = opcode_names[i];
-            if (name) {
-                printf("$%02X (%s): %d\n", i, name, opcode_counts[i]);
-            } else {
-                printf("$%02X (unknown): %d\n", i, opcode_counts[i]);
+            entries[entry_count].opcode = i;
+            entries[entry_count].count = opcode_counts[i];
+            entries[entry_count].name = opcode_names[i];
+            entry_count++;
+        }
+    }
+    
+    /* Sort by mnemonic name */
+    for (int i = 0; i < entry_count - 1; i++) {
+        for (int j = i + 1; j < entry_count; j++) {
+            const char *name_i = entries[i].name ? entries[i].name : "unknown";
+            const char *name_j = entries[j].name ? entries[j].name : "unknown";
+            if (strcmp(name_i, name_j) > 0) {
+                opcode_entry_t temp = entries[i];
+                entries[i] = entries[j];
+                entries[j] = temp;
             }
         }
     }
     
-    if (!found_any) {
+    /* Print sorted entries */
+    if (entry_count > 0) {
+        for (int i = 0; i < entry_count; i++) {
+            if (entries[i].name) {
+                printf("$%02X (%s): %d\n", entries[i].opcode, entries[i].name, entries[i].count);
+            } else {
+                printf("$%02X (unknown): %d\n", entries[i].opcode, entries[i].count);
+            }
+        }
+    } else {
         printf("No opcodes were emitted.\n");
     }
     
@@ -545,15 +614,41 @@ void stats_print_report(void) {
             }
             printf("\n\n");
             
-            int found_any = 0;
+            /* Collect immediate zero opcodes with counts > 0 and sort by mnemonic */
+            opcode_entry_t zero_entries[256];
+            int zero_entry_count = 0;
+            
             for (int i = 0; i < NUM_OPCODES; i++) {
                 if (immediate_zero_counts[i] > 0) {
-                    found_any = 1;
-                    const char *name = opcode_names[i];
-                    if (name) {
-                        printf("$%02X (%s): %d\n", i, name, immediate_zero_counts[i]);
+                    zero_entries[zero_entry_count].opcode = i;
+                    zero_entries[zero_entry_count].count = immediate_zero_counts[i];
+                    zero_entries[zero_entry_count].name = opcode_names[i];
+                    zero_entry_count++;
+                }
+            }
+            
+            /* Sort by mnemonic name */
+            for (int i = 0; i < zero_entry_count - 1; i++) {
+                for (int j = i + 1; j < zero_entry_count; j++) {
+                    const char *name_i = zero_entries[i].name ? zero_entries[i].name : "unknown";
+                    const char *name_j = zero_entries[j].name ? zero_entries[j].name : "unknown";
+                    if (strcmp(name_i, name_j) > 0) {
+                        opcode_entry_t temp = zero_entries[i];
+                        zero_entries[i] = zero_entries[j];
+                        zero_entries[j] = temp;
+                    }
+                }
+            }
+            
+            /* Print sorted entries */
+            int found_any = 0;
+            if (zero_entry_count > 0) {
+                found_any = 1;
+                for (int i = 0; i < zero_entry_count; i++) {
+                    if (zero_entries[i].name) {
+                        printf("$%02X (%s): %d\n", zero_entries[i].opcode, zero_entries[i].name, zero_entries[i].count);
                     } else {
-                        printf("$%02X (unknown): %d\n", i, immediate_zero_counts[i]);
+                        printf("$%02X (unknown): %d\n", zero_entries[i].opcode, zero_entries[i].count);
                     }
                 }
             }
@@ -618,6 +713,11 @@ void stats_print_report(void) {
         for (int i = 0; i < replacement_count; i++) {
             replacement_t *r = &replacements[i];
             printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
+            if (strcmp(r->type, "BRA") == 0) {
+                int16_t offset = (int16_t)(r->target_addr - (r->instr_addr + 2));
+                printf("    Instruction address: $%04X, Target address: $%04X, Offset: %d (range: -128 to +127)\n", 
+                       r->instr_addr, r->target_addr, offset);
+            }
             printf("    Old: %s\n", r->old_code);
             printf("    New: %s\n", r->new_code);
         }
@@ -636,42 +736,92 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
         printf("\n=== Opcode Statistics ===\n");
         printf("Total opcodes emitted: %d\n\n", total_opcodes);
         
-        int found_any = 0;
+        /* Collect opcodes with counts > 0 and sort by mnemonic */
+        typedef struct {
+            uint8_t opcode;
+            int count;
+            const char *name;
+        } opcode_entry_t;
+        
+        opcode_entry_t entries[256];
+        int entry_count = 0;
+        
         for (int i = 0; i < NUM_OPCODES; i++) {
             if (opcode_counts[i] > 0) {
-                found_any = 1;
-                const char *name = opcode_names[i];
-                if (name) {
-                    printf("$%02X (%s): %d\n", i, name, opcode_counts[i]);
-                } else {
-                    printf("$%02X (unknown): %d\n", i, opcode_counts[i]);
+                entries[entry_count].opcode = i;
+                entries[entry_count].count = opcode_counts[i];
+                entries[entry_count].name = opcode_names[i];
+                entry_count++;
+            }
+        }
+        
+        /* Sort by mnemonic name */
+        for (int i = 0; i < entry_count - 1; i++) {
+            for (int j = i + 1; j < entry_count; j++) {
+                const char *name_i = entries[i].name ? entries[i].name : "unknown";
+                const char *name_j = entries[j].name ? entries[j].name : "unknown";
+                if (strcmp(name_i, name_j) > 0) {
+                    opcode_entry_t temp = entries[i];
+                    entries[i] = entries[j];
+                    entries[j] = temp;
                 }
             }
         }
         
-        if (!found_any) {
+        /* Print sorted entries */
+        if (entry_count > 0) {
+            for (int i = 0; i < entry_count; i++) {
+                if (entries[i].name) {
+                    printf("$%02X (%s): %d\n", entries[i].opcode, entries[i].name, entries[i].count);
+                } else {
+                    printf("$%02X (unknown): %d\n", entries[i].opcode, entries[i].count);
+                }
+            }
+        } else {
             printf("No opcodes were emitted.\n");
         }
         
         /* Separate 65C02 statistics */
-        int c02_found = 0;
         if (c02_opcode_count > 0) {
             printf("\n=== 65C02 Opcode Statistics ===\n");
             printf("Total 65C02 opcodes: %d\n\n", c02_opcode_count);
             
+            /* Collect 65C02 opcodes with counts > 0 and sort by mnemonic */
+            opcode_entry_t c02_entries[256];
+            int c02_entry_count = 0;
+            
             for (int i = 0; i < NUM_OPCODES; i++) {
                 if (opcode_counts[i] > 0 && stats_is_c02_opcode(i)) {
-                    c02_found = 1;
-                    const char *name = opcode_names[i];
-                    if (name) {
-                        printf("$%02X (%s): %d\n", i, name, opcode_counts[i]);
-                    } else {
-                        printf("$%02X (unknown C02): %d\n", i, opcode_counts[i]);
+                    c02_entries[c02_entry_count].opcode = i;
+                    c02_entries[c02_entry_count].count = opcode_counts[i];
+                    c02_entries[c02_entry_count].name = opcode_names[i];
+                    c02_entry_count++;
+                }
+            }
+            
+            /* Sort by mnemonic name */
+            for (int i = 0; i < c02_entry_count - 1; i++) {
+                for (int j = i + 1; j < c02_entry_count; j++) {
+                    const char *name_i = c02_entries[i].name ? c02_entries[i].name : "unknown C02";
+                    const char *name_j = c02_entries[j].name ? c02_entries[j].name : "unknown C02";
+                    if (strcmp(name_i, name_j) > 0) {
+                        opcode_entry_t temp = c02_entries[i];
+                        c02_entries[i] = c02_entries[j];
+                        c02_entries[j] = temp;
                     }
                 }
             }
             
-            if (!c02_found) {
+            /* Print sorted entries */
+            if (c02_entry_count > 0) {
+                for (int i = 0; i < c02_entry_count; i++) {
+                    if (c02_entries[i].name) {
+                        printf("$%02X (%s): %d\n", c02_entries[i].opcode, c02_entries[i].name, c02_entries[i].count);
+                    } else {
+                        printf("$%02X (unknown C02): %d\n", c02_entries[i].opcode, c02_entries[i].count);
+                    }
+                }
+            } else {
                 printf("No 65C02 opcodes were emitted.\n");
             }
             printf("==============================\n");
@@ -688,15 +838,41 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             }
             printf("\n\n");
             
-            int found_any = 0;
+            /* Collect immediate zero opcodes with counts > 0 and sort by mnemonic */
+            opcode_entry_t zero_entries[256];
+            int zero_entry_count = 0;
+            
             for (int i = 0; i < NUM_OPCODES; i++) {
                 if (immediate_zero_counts[i] > 0) {
-                    found_any = 1;
-                    const char *name = opcode_names[i];
-                    if (name) {
-                        printf("$%02X (%s): %d\n", i, name, immediate_zero_counts[i]);
+                    zero_entries[zero_entry_count].opcode = i;
+                    zero_entries[zero_entry_count].count = immediate_zero_counts[i];
+                    zero_entries[zero_entry_count].name = opcode_names[i];
+                    zero_entry_count++;
+                }
+            }
+            
+            /* Sort by mnemonic name */
+            for (int i = 0; i < zero_entry_count - 1; i++) {
+                for (int j = i + 1; j < zero_entry_count; j++) {
+                    const char *name_i = zero_entries[i].name ? zero_entries[i].name : "unknown";
+                    const char *name_j = zero_entries[j].name ? zero_entries[j].name : "unknown";
+                    if (strcmp(name_i, name_j) > 0) {
+                        opcode_entry_t temp = zero_entries[i];
+                        zero_entries[i] = zero_entries[j];
+                        zero_entries[j] = temp;
+                    }
+                }
+            }
+            
+            /* Print sorted entries */
+            int found_any = 0;
+            if (zero_entry_count > 0) {
+                found_any = 1;
+                for (int i = 0; i < zero_entry_count; i++) {
+                    if (zero_entries[i].name) {
+                        printf("$%02X (%s): %d\n", zero_entries[i].opcode, zero_entries[i].name, zero_entries[i].count);
                     } else {
-                        printf("$%02X (unknown): %d\n", i, immediate_zero_counts[i]);
+                        printf("$%02X (unknown): %d\n", zero_entries[i].opcode, zero_entries[i].count);
                     }
                 }
             }
@@ -730,7 +906,7 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             
             /* Group by type */
             int stz_count = 0, phx_count = 0, phy_count = 0, plx_count = 0, ply_count = 0, bra_count = 0;
-            int inc_count = 0, dec_count = 0, tsb_count = 0, trb_count = 0;
+            int ina_count = 0, dea_count = 0, tsb_count = 0, trb_count = 0;
             
             for (int i = 0; i < replacement_count; i++) {
                 replacement_t *r = &replacements[i];
@@ -740,8 +916,8 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
                 else if (strcmp(r->type, "PLX") == 0) plx_count++;
                 else if (strcmp(r->type, "PLY") == 0) ply_count++;
                 else if (strcmp(r->type, "BRA") == 0) bra_count++;
-                else if (strcmp(r->type, "INC") == 0) inc_count++;
-                else if (strcmp(r->type, "DEC") == 0) dec_count++;
+                else if (strcmp(r->type, "INA") == 0) ina_count++;
+                else if (strcmp(r->type, "DEA") == 0) dea_count++;
                 else if (strcmp(r->type, "TSB") == 0) tsb_count++;
                 else if (strcmp(r->type, "TRB") == 0) trb_count++;
             }
@@ -752,24 +928,73 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             if (plx_count > 0) printf("  PLX replacements: %d\n", plx_count);
             if (ply_count > 0) printf("  PLY replacements: %d\n", ply_count);
             if (bra_count > 0) printf("  BRA replacements: %d\n", bra_count);
-            if (inc_count > 0) printf("  INC replacements: %d\n", inc_count);
-            if (dec_count > 0) printf("  DEC replacements: %d\n", dec_count);
+            if (ina_count > 0) printf("  INA replacements: %d\n", ina_count);
+            if (dea_count > 0) printf("  DEA replacements: %d\n", dea_count);
             if (tsb_count > 0) printf("  TSB replacements: %d\n", tsb_count);
             if (trb_count > 0) printf("  TRB replacements: %d\n", trb_count);
             
             printf("========================================\n");
         }
+        
+        /* Print optimization count summary */
+        if (optimization_count > 0) {
+            int total_bytes_saved = 0;
+            for (int i = 0; i < optimization_count; i++) {
+                total_bytes_saved += optimizations[i].bytes_saved;
+            }
+            
+            printf("\n=== Code Optimizations ===\n");
+            printf("Total possible optimizations: %d\n", optimization_count);
+            printf("Total bytes saved: %d", total_bytes_saved);
+            if (binary_size > 0) {
+                double percent = (double)total_bytes_saved * 100.0 / (double)binary_size;
+                printf(" (%.1f%% of %d bytes)", percent, binary_size);
+            }
+            printf("\n");
+            
+            /* Group by type */
+            int inc_count = 0, dec_count = 0;
+            
+            for (int i = 0; i < optimization_count; i++) {
+                replacement_t *r = &optimizations[i];
+                if (strcmp(r->type, "INC") == 0) inc_count++;
+                else if (strcmp(r->type, "DEC") == 0) dec_count++;
+            }
+            
+            if (inc_count > 0) printf("  INC optimizations: %d\n", inc_count);
+            if (dec_count > 0) printf("  DEC optimizations: %d\n", dec_count);
+            
+            printf("==========================\n");
+        }
     }
     
-    if (show_suggestions && replacement_count > 0) {
-        printf("\n=== 65C02 Replacement Suggestions ===\n");
-        for (int i = 0; i < replacement_count; i++) {
-            replacement_t *r = &replacements[i];
-            printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
-            printf("    Old: %s\n", r->old_code);
-            printf("    New: %s\n", r->new_code);
+    if (show_suggestions) {
+        if (replacement_count > 0) {
+            printf("\n=== 65C02 Replacement Suggestions ===\n");
+            for (int i = 0; i < replacement_count; i++) {
+                replacement_t *r = &replacements[i];
+                printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
+                if (strcmp(r->type, "BRA") == 0) {
+                    int16_t offset = (int16_t)(r->target_addr - (r->instr_addr + 2));
+                    printf("    Instruction address: $%04X, Target address: $%04X, Offset: %d (range: -128 to +127)\n", 
+                           r->instr_addr, r->target_addr, offset);
+                }
+                printf("    Old: %s\n", r->old_code);
+                printf("    New: %s\n", r->new_code);
+            }
+            printf("======================================\n");
         }
-        printf("======================================\n");
+        
+        if (optimization_count > 0) {
+            printf("\n=== Code Optimization Suggestions ===\n");
+            for (int i = 0; i < optimization_count; i++) {
+                replacement_t *r = &optimizations[i];
+                printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
+                printf("    Old: %s\n", r->old_code);
+                printf("    New: %s\n", r->new_code);
+            }
+            printf("=====================================\n");
+        }
     }
 }
 

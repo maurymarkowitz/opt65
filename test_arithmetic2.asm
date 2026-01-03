@@ -1,3 +1,0 @@
-FPREC     EQU     6
-FMPREC    EQU     FPREC-1
-CRTGI     EQU     $BFFC-3

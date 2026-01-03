@@ -106,7 +106,6 @@ int main(int argc, char *argv[]) {
         output_file = argv[optind + 1];
     }
     
-    stats_init();
     stats_set_filename(input_file);
     
     FILE *input = fopen(input_file, "r");
@@ -119,6 +118,38 @@ int main(int argc, char *argv[]) {
     extern char *yyfilename;
     yyfilename = input_file;
     
+    extern int pass;
+    extern uint16_t pc;
+    extern uint16_t org_address;
+    extern uint8_t output[];
+    extern int symbol_count;
+    
+    /* Pass 1: Build symbol table */
+    pass = 1;
+    pc = 0;
+    org_address = 0;
+    stats_init();  /* Reset stats for pass 1 */
+    if (yyparse() != 0) {
+        fprintf(stderr, "Parse error: %s at line %d\n", yytext, yylineno);
+        fclose(input);
+        return 1;
+    }
+    
+    /* Reset for pass 2 */
+    rewind(input);
+    extern int yylineno;
+    yylineno = 1;
+    
+    /* Pass 2: Generate code */
+    pass = 2;
+    pc = 0;
+    org_address = 0;
+    extern uint16_t min_address;
+    extern uint16_t max_address;
+    min_address = 0xFFFF;  /* Reset min/max tracking */
+    max_address = 0;
+    memset(output, 0, sizeof(output));
+    stats_init();  /* Reset stats for pass 2 (but keep symbol table) */
     if (yyparse() != 0) {
         fprintf(stderr, "Parse error: %s at line %d\n", yytext, yylineno);
         fclose(input);
@@ -151,8 +182,23 @@ int main(int argc, char *argv[]) {
             return 1;
         }
         
-        /* Write from org_address to pc */
-        if (fwrite(output + org_address, 1, pc - org_address, out) != pc - org_address) {
+        /* Calculate binary size using actual min/max addresses where code was emitted */
+        extern uint16_t min_address;
+        extern uint16_t max_address;
+        uint16_t actual_min = (min_address == 0xFFFF) ? org_address : min_address;
+        uint16_t actual_max = (max_address == 0) ? (pc > 0 ? pc - 1 : org_address) : max_address;
+        int binary_size = actual_max - actual_min + 1;
+        
+        if (binary_size <= 0) {
+            fprintf(stderr, "Error: Invalid address range (min=%d, max=%d, org_address=%d, pc=%d)\n", 
+                    actual_min, actual_max, org_address, pc);
+            fclose(out);
+            if (output_file_allocated) free(output_file);
+            return 1;
+        }
+        
+        /* Write from actual_min to actual_max */
+        if (fwrite(output + actual_min, 1, binary_size, out) != binary_size) {
             fprintf(stderr, "Error: Failed to write output file\n");
             fclose(out);
             if (output_file_allocated) free(output_file);
@@ -161,12 +207,24 @@ int main(int argc, char *argv[]) {
         
         fclose(out);
         printf("Assembled successfully: %d bytes written to '%s'\n", 
-               pc - org_address, output_file);
-        stats_set_binary_size(pc - org_address);
+               binary_size, output_file);
+        stats_set_binary_size(binary_size);
     } else {
+        /* Calculate binary size using actual min/max addresses where code was emitted */
+        extern uint16_t min_address;
+        extern uint16_t max_address;
+        uint16_t actual_min = (min_address == 0xFFFF) ? org_address : min_address;
+        uint16_t actual_max = (max_address == 0) ? (pc > 0 ? pc - 1 : org_address) : max_address;
+        int binary_size = actual_max - actual_min + 1;
+        
+        if (binary_size <= 0) {
+            fprintf(stderr, "Error: Invalid address range (min=%d, max=%d, org_address=%d, pc=%d)\n", 
+                    actual_min, actual_max, org_address, pc);
+            return 1;
+        }
         printf("Assembled successfully: %d bytes (not saved)\n", 
-               pc - org_address);
-        stats_set_binary_size(pc - org_address);
+               binary_size);
+        stats_set_binary_size(binary_size);
     }
     
     /* Print statistics based on flags */

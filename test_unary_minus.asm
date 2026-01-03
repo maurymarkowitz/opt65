@@ -1,0 +1,4 @@
+    .ORG $8000
+    VALUE1 = 100
+    VALUE2 = -VALUE1
+    VALUE3 = (-VALUE1)*256+50

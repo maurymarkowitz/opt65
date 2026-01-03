@@ -25,7 +25,7 @@ typedef struct {
     uint16_t value;
 } symbol_t;
 
-#define MAX_SYMBOLS 1024
+#define MAX_SYMBOLS 4096
 symbol_t symbols[MAX_SYMBOLS];
 int symbol_count = 0;
 
@@ -57,6 +57,11 @@ int is_conditional_active(void);
 uint8_t output[65536];
 uint16_t pc = 0;
 uint16_t org_address = 0;
+uint16_t min_address = 0xFFFF;  /* Track minimum address where code was emitted */
+uint16_t max_address = 0;       /* Track maximum address where code was emitted */
+
+/* Two-pass assembly support */
+int pass = 1;  /* 1 = symbol collection, 2 = code generation */
 
 /* Forward declarations */
 uint16_t eval_expr(char *expr);
@@ -64,7 +69,7 @@ void add_symbol(char *name, uint16_t value);
 uint16_t get_symbol(char *name);
 void emit_byte(uint8_t byte);
 void emit_word(uint16_t word);
-void emit_indexed(uint8_t zp_op, uint8_t abs_op, char *expr, int is_x);
+void emit_indexed(uint8_t zp_op, uint8_t abs_op, char *expr);
 void emit_addr(uint8_t zp_op, uint8_t abs_op, char *expr);
 void emit_opcode(uint8_t opcode);
 void check_zero_transfer(const char *instr, uint8_t opcode, char *expr);
@@ -123,6 +128,18 @@ line:
     | macro_invocation
     | if_block
     | endif_directive
+    | END { 
+        if (pass == 2) {
+            YYACCEPT;  /* End of file - stop parsing in pass 2 only */
+        }
+        /* In pass 1, continue to build complete symbol table */
+    }
+    | END NEWLINE { 
+        if (pass == 2) {
+            YYACCEPT;  /* End of file - stop parsing in pass 2 only */
+        }
+        /* In pass 1, continue to build complete symbol table */
+    }
     ;
 
 if_block:
@@ -176,8 +193,11 @@ assignment:
 org_equals:
     ORG_EQUALS expr_value { 
         if (is_conditional_active()) {
-            org_address = $2; 
-            pc = org_address; 
+            /* *= only sets PC, not org_address (org_address is set by first .ORG) */
+            if (org_address == 0) {
+                org_address = $2;  /* Only set org_address if not already set */
+            }
+            pc = $2; 
         }
     }
     ;
@@ -307,37 +327,9 @@ implied_instruction:
 
 accumulator_instruction:
     ASL { emit_opcode(0x0A); }
-    | ASL IDENTIFIER { 
-        if (strcasecmp($2, "A") == 0) {
-            emit_opcode(0x0A);  /* ASL A is same as ASL */
-        } else {
-            fprintf(stderr, "Error: ASL accumulator instruction cannot take operand '%s' at line %d\n", $2, yylineno);
-        }
-    }
     | LSR { emit_opcode(0x4A); }
-    | LSR IDENTIFIER { 
-        if (strcasecmp($2, "A") == 0) {
-            emit_opcode(0x4A);  /* LSR A is same as LSR */
-        } else {
-            fprintf(stderr, "Error: LSR accumulator instruction cannot take operand '%s' at line %d\n", $2, yylineno);
-        }
-    }
     | ROL { emit_opcode(0x2A); }
-    | ROL IDENTIFIER { 
-        if (strcasecmp($2, "A") == 0) {
-            emit_opcode(0x2A);  /* ROL A is same as ROL */
-        } else {
-            fprintf(stderr, "Error: ROL accumulator instruction cannot take operand '%s' at line %d\n", $2, yylineno);
-        }
-    }
     | ROR { emit_opcode(0x6A); }
-    | ROR IDENTIFIER { 
-        if (strcasecmp($2, "A") == 0) {
-            emit_opcode(0x6A);  /* ROR A is same as ROR */
-        } else {
-            fprintf(stderr, "Error: ROR accumulator instruction cannot take operand '%s' at line %d\n", $2, yylineno);
-        }
-    }
     ;
 
 immediate_instruction:
@@ -466,7 +458,14 @@ address_instruction:
         uint8_t op = (addr < 256) ? 0x25 : 0x2D;
         stats_record_instruction(op, "AND", addr, yylineno, yyfilename, NULL);
     }
-    | ASL expression { emit_addr(0x06, 0x0E, $2); }
+    | ASL expression { 
+        /* Check if expression is just "A" - if so, use accumulator form */
+        if ($2 && strcasecmp($2, "A") == 0) {
+            emit_opcode(0x0A);  /* ASL A is same as ASL */
+        } else {
+            emit_addr(0x06, 0x0E, $2);
+        }
+    }
     | BIT expression { emit_addr(0x24, 0x2C, $2); }
     | CMP expression { 
         uint16_t addr = eval_expr($2);
@@ -491,16 +490,26 @@ address_instruction:
     }
     | INC expression { emit_addr(0xE6, 0xEE, $2); }
     | JMP expression { 
-        uint16_t addr = eval_expr($2);
-        emit_opcode(0x4C);
-        emit_word(addr);
-        extern char *yyfilename;
-        stats_record_instruction(0x4C, "JMP", addr, yylineno, yyfilename, $2);
+        if (pass == 2) {
+            uint16_t addr = eval_expr($2);
+            emit_opcode(0x4C);
+            emit_word(addr);
+            extern char *yyfilename;
+            stats_record_instruction(0x4C, "JMP", addr, yylineno, yyfilename, $2);
+        } else {
+            emit_opcode(0x4C);
+            emit_word(0);
+        }
     }
     | JSR expression { 
-        uint16_t addr = eval_expr($2);
-        emit_opcode(0x20);
-        emit_word(addr);
+        if (pass == 2) {
+            uint16_t addr = eval_expr($2);
+            emit_opcode(0x20);
+            emit_word(addr);
+        } else {
+            emit_opcode(0x20);
+            emit_word(0);
+        }
     }
     | LDA expression { 
         uint16_t addr = eval_expr($2);
@@ -520,7 +529,14 @@ address_instruction:
         emit_addr(0xA4, 0xAC, $2);
         if (addr == 0) check_zero_transfer("LDY $00", 0xA4, $2);
     }
-    | LSR expression { emit_addr(0x46, 0x4E, $2); }
+    | LSR expression { 
+        /* Check if expression is just "A" - if so, use accumulator form */
+        if ($2 && strcasecmp($2, "A") == 0) {
+            emit_opcode(0x4A);  /* LSR A is same as LSR */
+        } else {
+            emit_addr(0x46, 0x4E, $2);
+        }
+    }
     | ORA expression { 
         uint16_t addr = eval_expr($2);
         emit_addr(0x05, 0x0D, $2);
@@ -529,8 +545,22 @@ address_instruction:
         uint8_t op = (addr < 256) ? 0x05 : 0x0D;
         stats_record_instruction(op, "ORA", addr, yylineno, yyfilename, NULL);
     }
-    | ROL expression { emit_addr(0x26, 0x2E, $2); }
-    | ROR expression { emit_addr(0x66, 0x6E, $2); }
+    | ROL expression { 
+        /* Check if expression is just "A" - if so, use accumulator form */
+        if ($2 && strcasecmp($2, "A") == 0) {
+            emit_opcode(0x2A);  /* ROL A is same as ROL */
+        } else {
+            emit_addr(0x26, 0x2E, $2);
+        }
+    }
+    | ROR expression { 
+        /* Check if expression is just "A" - if so, use accumulator form */
+        if ($2 && strcasecmp($2, "A") == 0) {
+            emit_opcode(0x6A);  /* ROR A is same as ROR */
+        } else {
+            emit_addr(0x66, 0x6E, $2);
+        }
+    }
     | SBC expression { 
         uint16_t addr = eval_expr($2);
         emit_addr(0xE5, 0xED, $2);
@@ -560,49 +590,49 @@ address_instruction:
     ;
 
 indexed_instruction:
-    ADC expression COMMA XREG { emit_indexed(0x75, 0x7D, $2, 1); }
-    | ADC expression COMMA YREG { emit_indexed(0x79, 0x79, $2, 0); }
-    | AND expression COMMA XREG { emit_indexed(0x35, 0x3D, $2, 1); }
-    | AND expression COMMA YREG { emit_indexed(0x39, 0x39, $2, 0); }
-    | ASL expression COMMA XREG { emit_indexed(0x16, 0x1E, $2, 1); }
-    | CMP expression COMMA XREG { emit_indexed(0xD5, 0xDD, $2, 1); }
-    | CMP expression COMMA YREG { emit_indexed(0xD9, 0xD9, $2, 0); }
-    | DEC expression COMMA XREG { emit_indexed(0xD6, 0xDE, $2, 1); }
-    | EOR expression COMMA XREG { emit_indexed(0x55, 0x5D, $2, 1); }
-    | EOR expression COMMA YREG { emit_indexed(0x59, 0x59, $2, 0); }
-    | INC expression COMMA XREG { emit_indexed(0xF6, 0xFE, $2, 1); }
+    ADC expression COMMA XREG { emit_indexed(0x75, 0x7D, $2); }
+    | ADC expression COMMA YREG { emit_indexed(0x79, 0x79, $2); }
+    | AND expression COMMA XREG { emit_indexed(0x35, 0x3D, $2); }
+    | AND expression COMMA YREG { emit_indexed(0x39, 0x39, $2); }
+    | ASL expression COMMA XREG { emit_indexed(0x16, 0x1E, $2); }
+    | CMP expression COMMA XREG { emit_indexed(0xD5, 0xDD, $2); }
+    | CMP expression COMMA YREG { emit_indexed(0xD9, 0xD9, $2); }
+    | DEC expression COMMA XREG { emit_indexed(0xD6, 0xDE, $2); }
+    | EOR expression COMMA XREG { emit_indexed(0x55, 0x5D, $2); }
+    | EOR expression COMMA YREG { emit_indexed(0x59, 0x59, $2); }
+    | INC expression COMMA XREG { emit_indexed(0xF6, 0xFE, $2); }
     | LDA expression COMMA XREG { 
         uint16_t addr = eval_expr($2);
-        emit_indexed(0xB5, 0xBD, $2, 1);
+        emit_indexed(0xB5, 0xBD, $2);
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0xB5 : 0xBD;
         stats_record_instruction(op, "LDA", addr, yylineno, yyfilename, NULL);
     }
     | LDA expression COMMA YREG { 
         uint16_t addr = eval_expr($2);
-        emit_indexed(0xB9, 0xB9, $2, 0);
+        emit_indexed(0xB9, 0xB9, $2);
         extern char *yyfilename;
         stats_record_instruction(0xB9, "LDA", addr, yylineno, yyfilename, NULL);
     }
-    | LDX expression COMMA YREG { emit_indexed(0xB6, 0xBE, $2, 0); }
-    | LDY expression COMMA XREG { emit_indexed(0xB4, 0xBC, $2, 1); }
-    | LSR expression COMMA XREG { emit_indexed(0x56, 0x5E, $2, 1); }
-    | ORA expression COMMA XREG { emit_indexed(0x15, 0x1D, $2, 1); }
-    | ORA expression COMMA YREG { emit_indexed(0x19, 0x19, $2, 0); }
-    | ROL expression COMMA XREG { emit_indexed(0x36, 0x3E, $2, 1); }
-    | ROR expression COMMA XREG { emit_indexed(0x76, 0x7E, $2, 1); }
-    | SBC expression COMMA XREG { emit_indexed(0xF5, 0xFD, $2, 1); }
-    | SBC expression COMMA YREG { emit_indexed(0xF9, 0xF9, $2, 0); }
+    | LDX expression COMMA YREG { emit_indexed(0xB6, 0xBE, $2); }
+    | LDY expression COMMA XREG { emit_indexed(0xB4, 0xBC, $2); }
+    | LSR expression COMMA XREG { emit_indexed(0x56, 0x5E, $2); }
+    | ORA expression COMMA XREG { emit_indexed(0x15, 0x1D, $2); }
+    | ORA expression COMMA YREG { emit_indexed(0x19, 0x19, $2); }
+    | ROL expression COMMA XREG { emit_indexed(0x36, 0x3E, $2); }
+    | ROR expression COMMA XREG { emit_indexed(0x76, 0x7E, $2); }
+    | SBC expression COMMA XREG { emit_indexed(0xF5, 0xFD, $2); }
+    | SBC expression COMMA YREG { emit_indexed(0xF9, 0xF9, $2); }
     | STA expression COMMA XREG { 
         uint16_t addr = eval_expr($2);
-        emit_indexed(0x95, 0x9D, $2, 1);
+        emit_indexed(0x95, 0x9D, $2);
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0x95 : 0x9D;
         stats_record_instruction(op, "STA", addr, yylineno, yyfilename, NULL);
     }
     | STA expression COMMA YREG { 
         uint16_t addr = eval_expr($2);
-        emit_indexed(0x99, 0x99, $2, 0);
+        emit_indexed(0x99, 0x99, $2);
         extern char *yyfilename;
         stats_record_instruction(0x99, "STA", addr, yylineno, yyfilename, NULL);
     }
@@ -625,7 +655,15 @@ indexed_instruction:
     ;
 
 indirect_instruction:
-    JMP LPAREN expression RPAREN { emit_opcode(0x6C); emit_word(eval_expr($3)); }
+    JMP LPAREN expression RPAREN { 
+        if (pass == 2) {
+            emit_opcode(0x6C);
+            emit_word(eval_expr($3));
+        } else {
+            emit_opcode(0x6C);
+            emit_word(0);
+        }
+    }
     | ADC LPAREN expression COMMA XREG RPAREN { emit_opcode(0x61); emit_byte(eval_expr($3) & 0xFF); }
     | AND LPAREN expression COMMA XREG RPAREN { emit_opcode(0x21); emit_byte(eval_expr($3) & 0xFF); }
     | CMP LPAREN expression COMMA XREG RPAREN { emit_opcode(0xC1); emit_byte(eval_expr($3) & 0xFF); }
@@ -646,88 +684,134 @@ indirect_instruction:
 
 relative_instruction:
     BCC expression { 
-        uint16_t target = eval_expr($2);
-        int16_t offset = (int16_t)(target - (pc + 1));
-        if (offset < -128 || offset > 127) {
-            fprintf(stderr, "Error: Branch offset out of range\n");
+        if (pass == 2) {
+            uint16_t target = eval_expr($2);
+            int16_t offset = (int16_t)(target - (pc + 1));
+            if (offset < -128 || offset > 127) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            }
+            emit_opcode(0x90); 
+            emit_byte(offset & 0xFF);
+        } else {
+            /* Pass 1: Just advance PC */
+            emit_opcode(0x90);
+            emit_byte(0);
         }
-        emit_opcode(0x90); 
-        emit_byte(offset & 0xFF); 
     }
     | BCS expression { 
-        uint16_t target = eval_expr($2);
-        int16_t offset = (int16_t)(target - (pc + 1));
-        if (offset < -128 || offset > 127) {
-            fprintf(stderr, "Error: Branch offset out of range\n");
+        if (pass == 2) {
+            uint16_t target = eval_expr($2);
+            int16_t offset = (int16_t)(target - (pc + 1));
+            if (offset < -128 || offset > 127) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            }
+            emit_opcode(0xB0); 
+            emit_byte(offset & 0xFF);
+        } else {
+            emit_opcode(0xB0);
+            emit_byte(0);
         }
-        emit_opcode(0xB0); 
-        emit_byte(offset & 0xFF); 
     }
     | BEQ expression { 
-        uint16_t target = eval_expr($2);
-        int16_t offset = (int16_t)(target - (pc + 1));
-        if (offset < -128 || offset > 127) {
-            fprintf(stderr, "Error: Branch offset out of range\n");
+        if (pass == 2) {
+            uint16_t target = eval_expr($2);
+            int16_t offset = (int16_t)(target - (pc + 1));
+            if (offset < -128 || offset > 127) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            }
+            emit_opcode(0xF0); 
+            emit_byte(offset & 0xFF);
+        } else {
+            emit_opcode(0xF0);
+            emit_byte(0);
         }
-        emit_opcode(0xF0); 
-        emit_byte(offset & 0xFF); 
     }
     | BMI expression { 
-        uint16_t target = eval_expr($2);
-        int16_t offset = (int16_t)(target - (pc + 1));
-        if (offset < -128 || offset > 127) {
-            fprintf(stderr, "Error: Branch offset out of range\n");
+        if (pass == 2) {
+            uint16_t target = eval_expr($2);
+            int16_t offset = (int16_t)(target - (pc + 1));
+            if (offset < -128 || offset > 127) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            }
+            emit_opcode(0x30); 
+            emit_byte(offset & 0xFF);
+        } else {
+            emit_opcode(0x30);
+            emit_byte(0);
         }
-        emit_opcode(0x30); 
-        emit_byte(offset & 0xFF); 
     }
     | BNE expression { 
-        uint16_t target = eval_expr($2);
-        int16_t offset = (int16_t)(target - (pc + 1));
-        if (offset < -128 || offset > 127) {
-            fprintf(stderr, "Error: Branch offset out of range\n");
+        if (pass == 2) {
+            uint16_t target = eval_expr($2);
+            int16_t offset = (int16_t)(target - (pc + 1));
+            if (offset < -128 || offset > 127) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            }
+            emit_opcode(0xD0); 
+            emit_byte(offset & 0xFF);
+        } else {
+            emit_opcode(0xD0);
+            emit_byte(0);
         }
-        emit_opcode(0xD0); 
-        emit_byte(offset & 0xFF); 
     }
     | BPL expression { 
-        uint16_t target = eval_expr($2);
-        int16_t offset = (int16_t)(target - (pc + 1));
-        if (offset < -128 || offset > 127) {
-            fprintf(stderr, "Error: Branch offset out of range\n");
+        if (pass == 2) {
+            uint16_t target = eval_expr($2);
+            int16_t offset = (int16_t)(target - (pc + 1));
+            if (offset < -128 || offset > 127) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            }
+            emit_opcode(0x10); 
+            emit_byte(offset & 0xFF);
+        } else {
+            emit_opcode(0x10);
+            emit_byte(0);
         }
-        emit_opcode(0x10); 
-        emit_byte(offset & 0xFF); 
     }
     | BVC expression { 
-        uint16_t target = eval_expr($2);
-        int16_t offset = (int16_t)(target - (pc + 1));
-        if (offset < -128 || offset > 127) {
-            fprintf(stderr, "Error: Branch offset out of range\n");
+        if (pass == 2) {
+            uint16_t target = eval_expr($2);
+            int16_t offset = (int16_t)(target - (pc + 1));
+            if (offset < -128 || offset > 127) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            }
+            emit_opcode(0x50); 
+            emit_byte(offset & 0xFF);
+        } else {
+            emit_opcode(0x50);
+            emit_byte(0);
         }
-        emit_opcode(0x50); 
-        emit_byte(offset & 0xFF); 
     }
     | BVS expression { 
-        uint16_t target = eval_expr($2);
-        int16_t offset = (int16_t)(target - (pc + 1));
-        if (offset < -128 || offset > 127) {
-            fprintf(stderr, "Error: Branch offset out of range\n");
+        if (pass == 2) {
+            uint16_t target = eval_expr($2);
+            int16_t offset = (int16_t)(target - (pc + 1));
+            if (offset < -128 || offset > 127) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            }
+            emit_opcode(0x70); 
+            emit_byte(offset & 0xFF);
+        } else {
+            emit_opcode(0x70);
+            emit_byte(0);
         }
-        emit_opcode(0x70); 
-        emit_byte(offset & 0xFF); 
     }
     ;
 
 c02_instruction:
     BRA expression { 
-        uint16_t target = eval_expr($2);
-        int16_t offset = (int16_t)(target - (pc + 1));
-        if (offset < -128 || offset > 127) {
-            fprintf(stderr, "Error: Branch offset out of range\n");
+        if (pass == 2) {
+            uint16_t target = eval_expr($2);
+            int16_t offset = (int16_t)(target - (pc + 1));
+            if (offset < -128 || offset > 127) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            }
+            emit_opcode(0x80); 
+            emit_byte(offset & 0xFF);
+        } else {
+            emit_opcode(0x80);
+            emit_byte(0);
         }
-        emit_opcode(0x80); 
-        emit_byte(offset & 0xFF); 
     }
     | PHX { emit_opcode(0xDA); }
     | PHY { emit_opcode(0x5A); }
@@ -779,7 +863,14 @@ c02_instruction:
 
 directive:
     ORG expression { org_address = eval_expr($2); pc = org_address; }
-    | ORG_EQUALS expression { org_address = eval_expr($2); pc = org_address; }
+    | ORG_EQUALS expression { 
+        uint16_t new_pc = eval_expr($2);
+        /* *= only sets PC, not org_address (org_address is set by first .ORG) */
+        if (org_address == 0) {
+            org_address = new_pc;  /* Only set org_address if not already set */
+        }
+        pc = new_pc; 
+    }
     | BYTE byte_list { /* byte_list handles emitting */ }
     | WORD word_list { /* word_list handles emitting */ }
     | RES expression { pc += eval_expr($2); }
@@ -791,7 +882,12 @@ directive:
     | LIST XREG { /* List directive with X parameter - no-op, ignore parameter */ }
     | LIST YREG { /* List directive with Y parameter - no-op, ignore parameter */ }
     | LIST expression { /* List directive with expression - no-op, ignore parameter */ }
-    | END { YYACCEPT; }  /* End of file - stop parsing */
+    | END { 
+        if (pass == 2) {
+            YYACCEPT;  /* End of file - stop parsing in pass 2 only */
+        }
+        /* In pass 1, continue to build complete symbol table */
+    }
     ;
 
 byte_list:
@@ -866,7 +962,7 @@ macro_invocation:
             /* Continue parsing - the macro body will be parsed as regular lines */
         } else {
             /* Not a macro - treat as error for now */
-            fprintf(stderr, "Error: Unknown identifier '%s' (not a macro or label)\n", $1);
+            fprintf(stderr, "Error: Unknown identifier '%s' (not a macro or label) at line %d\n", $1, yylineno);
         }
     }
     ;
@@ -1056,7 +1152,10 @@ uint16_t get_symbol(char *name) {
         }
     }
     
-    fprintf(stderr, "Warning: Undefined symbol '%s' at line %d, assuming 0\n", name, yylineno);
+    /* In pass 1, forward references are expected - don't warn */
+    if (pass == 2) {
+        fprintf(stderr, "Warning: Undefined symbol '%s' at line %d, assuming 0\n", name, yylineno);
+    }
     return 0;
 }
 
@@ -1072,12 +1171,17 @@ int is_conditional_active(void) {
 
 void emit_byte(uint8_t byte) {
     if (!is_conditional_active()) return;  /* Skip if in false conditional block */
-    if (pc >= 65536) {
+    if (pc > 65535) {
         fprintf(stderr, "Error: Program counter overflow\n");
         return;
     }
-    output[pc] = byte;
-    pc++;
+    if (pass == 2) {
+        output[pc] = byte;  /* Only write to output in pass 2 */
+        /* Track actual address range where bytes were emitted */
+        if (pc < min_address) min_address = pc;
+        if (pc > max_address) max_address = pc;
+    }
+    pc++;  /* Always advance PC in both passes */
 }
 
 void emit_opcode(uint8_t opcode) {
@@ -1091,7 +1195,7 @@ void emit_word(uint16_t word) {
     emit_byte((word >> 8) & 0xFF);
 }
 
-void emit_indexed(uint8_t zp_op, uint8_t abs_op, char *expr, int is_x) {
+void emit_indexed(uint8_t zp_op, uint8_t abs_op, char *expr) {
     uint16_t addr = eval_expr(expr);
     if (addr < 256) {
         /* Zero page indexed */

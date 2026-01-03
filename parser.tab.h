@@ -118,21 +118,29 @@
      PAGE = 334,
      TITLE = 335,
      LIST = 336,
-     MACRO_BODY = 337,
-     HASH = 338,
-     LPAREN = 339,
-     RPAREN = 340,
-     COMMA = 341,
-     COLON = 342,
-     EQUALS = 343,
-     XREG = 344,
-     YREG = 345,
-     NEWLINE = 346,
-     PLUS = 347,
-     MINUS = 348,
-     MULTIPLY = 349,
-     DIVIDE = 350,
-     ORG_EQUALS = 351
+     IF = 337,
+     ENDIF = 338,
+     END = 339,
+     LOW = 340,
+     HIGH = 341,
+     AND_OP = 342,
+     OR_OP = 343,
+     MACRO_BODY = 344,
+     HASH = 345,
+     LPAREN = 346,
+     RPAREN = 347,
+     COMMA = 348,
+     COLON = 349,
+     EQUALS = 350,
+     XREG = 351,
+     YREG = 352,
+     NEWLINE = 353,
+     PLUS = 354,
+     MINUS = 355,
+     MULTIPLY = 356,
+     DIVIDE = 357,
+     ORG_EQUALS = 358,
+     UMINUS = 359
    };
 #endif
 /* Tokens.  */
@@ -215,34 +223,42 @@
 #define PAGE 334
 #define TITLE 335
 #define LIST 336
-#define MACRO_BODY 337
-#define HASH 338
-#define LPAREN 339
-#define RPAREN 340
-#define COMMA 341
-#define COLON 342
-#define EQUALS 343
-#define XREG 344
-#define YREG 345
-#define NEWLINE 346
-#define PLUS 347
-#define MINUS 348
-#define MULTIPLY 349
-#define DIVIDE 350
-#define ORG_EQUALS 351
+#define IF 337
+#define ENDIF 338
+#define END 339
+#define LOW 340
+#define HIGH 341
+#define AND_OP 342
+#define OR_OP 343
+#define MACRO_BODY 344
+#define HASH 345
+#define LPAREN 346
+#define RPAREN 347
+#define COMMA 348
+#define COLON 349
+#define EQUALS 350
+#define XREG 351
+#define YREG 352
+#define NEWLINE 353
+#define PLUS 354
+#define MINUS 355
+#define MULTIPLY 356
+#define DIVIDE 357
+#define ORG_EQUALS 358
+#define UMINUS 359
 
 
 
 
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 typedef union YYSTYPE
-#line 70 "parser.y"
+#line 83 "parser.y"
 {
     int ival;
     char *sval;
 }
 /* Line 1529 of yacc.c.  */
-#line 246 "parser.tab.h"
+#line 262 "parser.tab.h"
 	YYSTYPE;
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1
