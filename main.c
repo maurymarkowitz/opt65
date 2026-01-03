@@ -146,8 +146,12 @@ int main(int argc, char *argv[]) {
     org_address = 0;
     extern uint16_t min_address;
     extern uint16_t max_address;
+    extern uint16_t min_opcode_address;
+    extern uint16_t max_opcode_address;
     min_address = 0xFFFF;  /* Reset min/max tracking */
     max_address = 0;
+    min_opcode_address = 0xFFFF;  /* Reset opcode address tracking */
+    max_opcode_address = 0;
     memset(output, 0, sizeof(output));
     stats_init();  /* Reset stats for pass 2 (but keep symbol table) */
     if (yyparse() != 0) {

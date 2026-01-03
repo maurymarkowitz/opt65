@@ -12,6 +12,7 @@
 static int opcode_counts[NUM_OPCODES];
 static int immediate_zero_counts[NUM_OPCODES];
 static int total_opcodes = 0;
+static int total_opcode_bytes = 0;  /* Total bytes used by opcodes (1, 2, or 3 bytes each) */
 static int total_immediate_zero = 0;
 static int sta_zero_count = 0;
 static int c02_opcode_count = 0;
@@ -119,6 +120,7 @@ void stats_init(void) {
     memset(opcode_counts, 0, sizeof(opcode_counts));
     memset(immediate_zero_counts, 0, sizeof(immediate_zero_counts));
     total_opcodes = 0;
+    total_opcode_bytes = 0;
     total_immediate_zero = 0;
     sta_zero_count = 0;
     zero_transfer_count = 0;
@@ -140,9 +142,96 @@ void stats_set_filename(const char *filename) {
     current_filename = filename ? strdup(filename) : NULL;
 }
 
+/* Determine opcode size in bytes (1, 2, or 3) */
+static int get_opcode_size(uint8_t opcode) {
+    /* Implied/accumulator addressing: 1 byte */
+    if (opcode == 0x00 || opcode == 0x08 || opcode == 0x0A || opcode == 0x18 ||
+        opcode == 0x28 || opcode == 0x2A || opcode == 0x38 || opcode == 0x40 ||
+        opcode == 0x48 || opcode == 0x4A || opcode == 0x58 || opcode == 0x60 ||
+        opcode == 0x68 || opcode == 0x6A || opcode == 0x78 || opcode == 0x88 ||
+        opcode == 0x8A || opcode == 0x98 || opcode == 0x9A || opcode == 0xA8 ||
+        opcode == 0xAA || opcode == 0xB8 || opcode == 0xBA || opcode == 0xC8 ||
+        opcode == 0xCA || opcode == 0xD8 || opcode == 0xE8 || opcode == 0xEA ||
+        opcode == 0xF8) {
+        return 1;
+    }
+    
+    /* Immediate addressing: 2 bytes */
+    if (opcode == 0x09 || opcode == 0x29 || opcode == 0x49 || opcode == 0x69 ||
+        opcode == 0xA0 || opcode == 0xA2 || opcode == 0xA9 || opcode == 0xC0 ||
+        opcode == 0xC9 || opcode == 0xE0 || opcode == 0xE9) {
+        return 2;
+    }
+    
+    /* Zero page addressing: 2 bytes */
+    if ((opcode >= 0x04 && opcode <= 0x07) || (opcode >= 0x14 && opcode <= 0x17) ||
+        (opcode >= 0x24 && opcode <= 0x27) || (opcode >= 0x34 && opcode <= 0x37) ||
+        (opcode >= 0x44 && opcode <= 0x47) || (opcode >= 0x54 && opcode <= 0x57) ||
+        (opcode >= 0x64 && opcode <= 0x67) || (opcode == 0x74) || (opcode >= 0x84 && opcode <= 0x87) ||
+        (opcode >= 0x94 && opcode <= 0x97) || (opcode >= 0xA4 && opcode <= 0xA7) ||
+        (opcode >= 0xB4 && opcode <= 0xB7) || (opcode >= 0xC4 && opcode <= 0xC7) ||
+        (opcode >= 0xD4 && opcode <= 0xD7) || (opcode >= 0xE4 && opcode <= 0xE7) ||
+        (opcode >= 0xF4 && opcode <= 0xF7)) {
+        return 2;
+    }
+    
+    /* Zero page indexed: 2 bytes */
+    if ((opcode >= 0x15 && opcode <= 0x17) || (opcode >= 0x35 && opcode <= 0x37) ||
+        (opcode >= 0x55 && opcode <= 0x57) || (opcode >= 0x75 && opcode <= 0x77) ||
+        (opcode >= 0x95 && opcode <= 0x97) || (opcode >= 0xB5 && opcode <= 0xB7) ||
+        (opcode >= 0xD5 && opcode <= 0xD7) || (opcode >= 0xF5 && opcode <= 0xF7)) {
+        return 2;
+    }
+    
+    /* Indirect addressing: 2 bytes (ind,X) or 3 bytes (ind) */
+    if (opcode == 0x01 || opcode == 0x21 || opcode == 0x41 || opcode == 0x61 ||
+        opcode == 0x81 || opcode == 0xA1 || opcode == 0xC1 || opcode == 0xE1) {
+        return 2;  /* (ind,X) */
+    }
+    if (opcode == 0x6C) {
+        return 3;  /* (ind) */
+    }
+    
+    /* Indirect indexed: 2 bytes */
+    if (opcode == 0x11 || opcode == 0x31 || opcode == 0x51 || opcode == 0x71 ||
+        opcode == 0x91 || opcode == 0xB1 || opcode == 0xD1 || opcode == 0xF1) {
+        return 2;
+    }
+    
+    /* Relative addressing (branches): 2 bytes */
+    if (opcode == 0x10 || opcode == 0x30 || opcode == 0x50 || opcode == 0x70 ||
+        opcode == 0x90 || opcode == 0xB0 || opcode == 0xD0 || opcode == 0xF0) {
+        return 2;
+    }
+    
+    /* Absolute addressing: 3 bytes */
+    if ((opcode >= 0x0C && opcode <= 0x0F) || (opcode >= 0x1C && opcode <= 0x1F) ||
+        (opcode >= 0x2C && opcode <= 0x2F) || (opcode >= 0x3C && opcode <= 0x3F) ||
+        (opcode >= 0x4C && opcode <= 0x4F) || (opcode >= 0x5C && opcode <= 0x5F) ||
+        (opcode >= 0x6C && opcode <= 0x6F) || (opcode >= 0x7C && opcode <= 0x7F) ||
+        (opcode >= 0x8C && opcode <= 0x8F) || (opcode >= 0x9C && opcode <= 0x9F) ||
+        (opcode >= 0xAC && opcode <= 0xAF) || (opcode >= 0xBC && opcode <= 0xBF) ||
+        (opcode >= 0xCC && opcode <= 0xCF) || (opcode >= 0xDC && opcode <= 0xDF) ||
+        (opcode >= 0xEC && opcode <= 0xEF) || (opcode >= 0xFC && opcode <= 0xFF)) {
+        return 3;
+    }
+    
+    /* Absolute indexed: 3 bytes */
+    if ((opcode >= 0x19 && opcode <= 0x1F) || (opcode >= 0x39 && opcode <= 0x3F) ||
+        (opcode >= 0x59 && opcode <= 0x5F) || (opcode >= 0x79 && opcode <= 0x7F) ||
+        (opcode >= 0x99 && opcode <= 0x9F) || (opcode >= 0xB9 && opcode <= 0xBF) ||
+        (opcode >= 0xD9 && opcode <= 0xDF) || (opcode >= 0xF9 && opcode <= 0xFF)) {
+        return 3;
+    }
+    
+    /* Default: assume 2 bytes for unknown opcodes */
+    return 2;
+}
+
 void stats_record_opcode(uint8_t opcode) {
     opcode_counts[opcode]++;
     total_opcodes++;
+    total_opcode_bytes += get_opcode_size(opcode);
     if (stats_is_c02_opcode(opcode)) {
         c02_opcode_count++;
     }
@@ -527,8 +616,26 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
 }
 
 void stats_print_report(void) {
+    extern uint16_t min_address;
+    extern uint16_t max_address;
+    extern uint16_t min_opcode_address;
+    extern uint16_t max_opcode_address;
+    extern uint16_t org_address;
+    
     printf("\n=== Binary Statistics ===\n");
     printf("Total bytes in binary: %d\n", binary_size);
+    if (min_address != 0xFFFF && max_address != 0) {
+        printf("Lowest emitted address (includes data bytes): $%04X\n", min_address);
+        printf("Highest emitted address (includes data bytes): $%04X\n", max_address);
+    } else if (binary_size > 0) {
+        /* Fallback to org_address if min/max not set */
+        printf("Lowest emitted address (includes data bytes): $%04X\n", org_address);
+        printf("Highest emitted address (includes data bytes): $%04X\n", org_address + binary_size - 1);
+    }
+    if (min_opcode_address != 0xFFFF && max_opcode_address != 0) {
+        printf("Lowest opcode address: $%04X\n", min_opcode_address);
+        printf("Highest opcode address: $%04X\n", max_opcode_address);
+    }
     printf("========================\n");
     
     printf("\n=== Opcode Statistics ===\n");
@@ -674,9 +781,9 @@ void stats_print_report(void) {
         printf("\n=== 65C02 Replacement Opportunities ===\n");
         printf("Total possible replacements: %d\n", replacement_count);
         printf("Total bytes saved: %d", total_bytes_saved);
-        if (binary_size > 0) {
-            double percent = (double)total_bytes_saved * 100.0 / (double)binary_size;
-            printf(" (%.1f%% of %d bytes)", percent, binary_size);
+        if (total_opcode_bytes > 0) {
+            double percent = (double)total_bytes_saved * 100.0 / (double)total_opcode_bytes;
+            printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
         }
         printf("\n\n");
         
@@ -715,7 +822,7 @@ void stats_print_report(void) {
             printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
             if (strcmp(r->type, "BRA") == 0) {
                 int16_t offset = (int16_t)(r->target_addr - (r->instr_addr + 2));
-                printf("    Instruction address: $%04X, Target address: $%04X, Offset: %d (range: -128 to +127)\n", 
+                printf("    Instruction address: $%04X, Target address: $%04X, Offset: %+d\n", 
                        r->instr_addr, r->target_addr, offset);
             }
             printf("    Old: %s\n", r->old_code);
@@ -728,8 +835,26 @@ void stats_print_report(void) {
 void stats_print_report_custom(int print_stats, int show_suggestions) {
     if (print_stats) {
         /* Print binary statistics */
+        extern uint16_t min_address;
+        extern uint16_t max_address;
+        extern uint16_t min_opcode_address;
+        extern uint16_t max_opcode_address;
+        extern uint16_t org_address;
+        
         printf("\n=== Binary Statistics ===\n");
         printf("Total bytes in binary: %d\n", binary_size);
+        if (min_address != 0xFFFF && max_address != 0) {
+            printf("Lowest emitted address (includes data bytes): $%04X\n", min_address);
+            printf("Highest emitted address (includes data bytes): $%04X\n", max_address);
+        } else if (binary_size > 0) {
+            /* Fallback to org_address if min/max not set */
+            printf("Lowest emitted address (includes data bytes): $%04X\n", org_address);
+            printf("Highest emitted address (includes data bytes): $%04X\n", org_address + binary_size - 1);
+        }
+        if (min_opcode_address != 0xFFFF && max_opcode_address != 0) {
+            printf("Lowest opcode address: $%04X\n", min_opcode_address);
+            printf("Highest opcode address: $%04X\n", max_opcode_address);
+        }
         printf("========================\n");
         
         /* Print opcode statistics */
@@ -898,9 +1023,9 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             printf("\n=== 65C02 Replacement Opportunities ===\n");
             printf("Total possible replacements: %d\n", replacement_count);
             printf("Total bytes saved: %d", total_bytes_saved);
-            if (binary_size > 0) {
-                double percent = (double)total_bytes_saved * 100.0 / (double)binary_size;
-                printf(" (%.1f%% of %d bytes)", percent, binary_size);
+            if (total_opcode_bytes > 0) {
+                double percent = (double)total_bytes_saved * 100.0 / (double)total_opcode_bytes;
+                printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
             }
             printf("\n");
             
@@ -946,9 +1071,9 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             printf("\n=== Code Optimizations ===\n");
             printf("Total possible optimizations: %d\n", optimization_count);
             printf("Total bytes saved: %d", total_bytes_saved);
-            if (binary_size > 0) {
-                double percent = (double)total_bytes_saved * 100.0 / (double)binary_size;
-                printf(" (%.1f%% of %d bytes)", percent, binary_size);
+            if (total_opcode_bytes > 0) {
+                double percent = (double)total_bytes_saved * 100.0 / (double)total_opcode_bytes;
+                printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
             }
             printf("\n");
             
@@ -976,7 +1101,7 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
                 printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
                 if (strcmp(r->type, "BRA") == 0) {
                     int16_t offset = (int16_t)(r->target_addr - (r->instr_addr + 2));
-                    printf("    Instruction address: $%04X, Target address: $%04X, Offset: %d (range: -128 to +127)\n", 
+                    printf("    Instruction address: $%04X, Target address: $%04X, Offset: %+d\n", 
                            r->instr_addr, r->target_addr, offset);
                 }
                 printf("    Old: %s\n", r->old_code);
@@ -1003,7 +1128,7 @@ int stats_get_count(uint8_t opcode) {
 }
 
 int stats_is_c02_opcode(uint8_t opcode) {
-    for (int i = 0; i < NUM_C02_OPCODES; i++) {
+    for (int i = 0; i < (int)NUM_C02_OPCODES; i++) {
         if (c02_opcodes[i] == opcode) {
             return 1;
         }

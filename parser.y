@@ -59,6 +59,8 @@ uint16_t pc = 0;
 uint16_t org_address = 0;
 uint16_t min_address = 0xFFFF;  /* Track minimum address where code was emitted */
 uint16_t max_address = 0;       /* Track maximum address where code was emitted */
+uint16_t min_opcode_address = 0xFFFF;  /* Track minimum address where opcodes were emitted */
+uint16_t max_opcode_address = 0;       /* Track maximum address where opcodes were emitted */
 
 /* Two-pass assembly support */
 int pass = 1;  /* 1 = symbol collection, 2 = code generation */
@@ -1187,6 +1189,11 @@ void emit_byte(uint8_t byte) {
 void emit_opcode(uint8_t opcode) {
     if (!is_conditional_active()) return;  /* Skip if in false conditional block */
     stats_record_opcode(opcode);
+    if (pass == 2) {
+        /* Track opcode address range */
+        if (pc < min_opcode_address) min_opcode_address = pc;
+        if (pc > max_opcode_address) max_opcode_address = pc;
+    }
     emit_byte(opcode);
 }
 

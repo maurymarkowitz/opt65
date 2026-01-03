@@ -340,6 +340,8 @@ uint16_t pc = 0;
 uint16_t org_address = 0;
 uint16_t min_address = 0xFFFF;  /* Track minimum address where code was emitted */
 uint16_t max_address = 0;       /* Track maximum address where code was emitted */
+uint16_t min_opcode_address = 0xFFFF;  /* Track minimum address where opcodes were emitted */
+uint16_t max_opcode_address = 0;       /* Track maximum address where opcodes were emitted */
 
 /* Two-pass assembly support */
 int pass = 1;  /* 1 = symbol collection, 2 = code generation */
@@ -381,13 +383,13 @@ void end_macro_definition(void);
 
 #if ! defined YYSTYPE && ! defined YYSTYPE_IS_DECLARED
 typedef union YYSTYPE
-#line 83 "parser.y"
+#line 85 "parser.y"
 {
     int ival;
     char *sval;
 }
 /* Line 193 of yacc.c.  */
-#line 391 "parser.tab.c"
+#line 393 "parser.tab.c"
 	YYSTYPE;
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
 # define YYSTYPE_IS_DECLARED 1
@@ -400,7 +402,7 @@ typedef union YYSTYPE
 
 
 /* Line 216 of yacc.c.  */
-#line 404 "parser.tab.c"
+#line 406 "parser.tab.c"
 
 #ifdef short
 # undef short
@@ -811,35 +813,35 @@ static const yytype_int16 yyrhs[] =
 /* YYRLINE[YYN] -- source line where rule number YYN was defined.  */
 static const yytype_uint16 yyrline[] =
 {
-       0,   110,   110,   111,   115,   116,   117,   118,   119,   120,
-     121,   122,   123,   124,   125,   126,   127,   128,   129,   130,
-     131,   137,   146,   157,   167,   176,   181,   186,   194,   206,
-     207,   208,   209,   210,   211,   212,   213,   217,   218,   219,
-     220,   221,   222,   223,   224,   225,   226,   227,   232,   233,
-     238,   239,   240,   241,   242,   243,   244,   245,   246,   247,
-     248,   249,   250,   251,   252,   253,   254,   255,   256,   257,
-     258,   259,   260,   261,   262,   263,   264,   265,   266,   267,
-     268,   269,   270,   271,   272,   273,   274,   275,   276,   277,
-     278,   279,   280,   281,   282,   283,   284,   285,   286,   287,
-     288,   289,   290,   291,   292,   293,   294,   295,   296,   297,
-     298,   299,   300,   301,   302,   303,   304,   305,   306,   307,
-     308,   309,   310,   311,   312,   317,   322,   323,   324,   325,
-     329,   330,   331,   332,   336,   347,   358,   367,   376,   385,
-     394,   405,   414,   423,   434,   448,   453,   461,   469,   470,
-     475,   480,   485,   486,   491,   492,   504,   514,   522,   527,
-     532,   540,   548,   556,   564,   569,   580,   585,   593,   594,
-     595,   596,   597,   598,   599,   600,   601,   602,   603,   604,
-     611,   617,   618,   619,   620,   621,   622,   623,   624,   625,
-     626,   633,   639,   647,   658,   667,   668,   669,   670,   671,
-     672,   673,   674,   675,   676,   677,   678,   679,   680,   681,
-     682,   686,   701,   715,   729,   743,   757,   771,   785,   802,
-     816,   817,   818,   819,   820,   821,   822,   832,   842,   852,
-     865,   866,   874,   875,   876,   877,   878,   879,   880,   881,
-     882,   883,   884,   885,   894,   899,   907,   912,   920,   948,
-     952,   971,   972,   973,   974,   980,   988,   996,  1006,  1007,
-    1014,  1021,  1028,  1039,  1052,  1065,  1069,  1070,  1071,  1072,
-    1073,  1078,  1083,  1084,  1085,  1086,  1087,  1088,  1096,  1099,
-    1102
+       0,   112,   112,   113,   117,   118,   119,   120,   121,   122,
+     123,   124,   125,   126,   127,   128,   129,   130,   131,   132,
+     133,   139,   148,   159,   169,   178,   183,   188,   196,   208,
+     209,   210,   211,   212,   213,   214,   215,   219,   220,   221,
+     222,   223,   224,   225,   226,   227,   228,   229,   234,   235,
+     240,   241,   242,   243,   244,   245,   246,   247,   248,   249,
+     250,   251,   252,   253,   254,   255,   256,   257,   258,   259,
+     260,   261,   262,   263,   264,   265,   266,   267,   268,   269,
+     270,   271,   272,   273,   274,   275,   276,   277,   278,   279,
+     280,   281,   282,   283,   284,   285,   286,   287,   288,   289,
+     290,   291,   292,   293,   294,   295,   296,   297,   298,   299,
+     300,   301,   302,   303,   304,   305,   306,   307,   308,   309,
+     310,   311,   312,   313,   314,   319,   324,   325,   326,   327,
+     331,   332,   333,   334,   338,   349,   360,   369,   378,   387,
+     396,   407,   416,   425,   436,   450,   455,   463,   471,   472,
+     477,   482,   487,   488,   493,   494,   506,   516,   524,   529,
+     534,   542,   550,   558,   566,   571,   582,   587,   595,   596,
+     597,   598,   599,   600,   601,   602,   603,   604,   605,   606,
+     613,   619,   620,   621,   622,   623,   624,   625,   626,   627,
+     628,   635,   641,   649,   660,   669,   670,   671,   672,   673,
+     674,   675,   676,   677,   678,   679,   680,   681,   682,   683,
+     684,   688,   703,   717,   731,   745,   759,   773,   787,   804,
+     818,   819,   820,   821,   822,   823,   824,   834,   844,   854,
+     867,   868,   876,   877,   878,   879,   880,   881,   882,   883,
+     884,   885,   886,   887,   896,   901,   909,   914,   922,   950,
+     954,   973,   974,   975,   976,   982,   990,   998,  1008,  1009,
+    1016,  1023,  1030,  1041,  1054,  1067,  1071,  1072,  1073,  1074,
+    1075,  1080,  1085,  1086,  1087,  1088,  1089,  1090,  1098,  1101,
+    1104
 };
 #endif
 
@@ -2162,17 +2164,17 @@ yyreduce:
   switch (yyn)
     {
         case 14:
-#line 125 "parser.y"
+#line 127 "parser.y"
     { /* Title directive - no-op, rest of line will be consumed by lexer */ ;}
     break;
 
   case 15:
-#line 126 "parser.y"
+#line 128 "parser.y"
     { /* List directive - no-op */ ;}
     break;
 
   case 20:
-#line 131 "parser.y"
+#line 133 "parser.y"
     { 
         if (pass == 2) {
             YYACCEPT;  /* End of file - stop parsing in pass 2 only */
@@ -2182,7 +2184,7 @@ yyreduce:
     break;
 
   case 21:
-#line 137 "parser.y"
+#line 139 "parser.y"
     { 
         if (pass == 2) {
             YYACCEPT;  /* End of file - stop parsing in pass 2 only */
@@ -2192,7 +2194,7 @@ yyreduce:
     break;
 
   case 22:
-#line 146 "parser.y"
+#line 148 "parser.y"
     {
         int condition = (yyvsp[(2) - (3)].ival) != 0;
         if (if_stack_depth >= MAX_IF_DEPTH) {
@@ -2204,7 +2206,7 @@ yyreduce:
     break;
 
   case 23:
-#line 157 "parser.y"
+#line 159 "parser.y"
     {
         if (if_stack_depth == 0) {
             fprintf(stderr, "Error: ENDIF without matching IF at line %d\n", yylineno);
@@ -2215,7 +2217,7 @@ yyreduce:
     break;
 
   case 24:
-#line 168 "parser.y"
+#line 170 "parser.y"
     {
         if (is_conditional_active()) {
             add_symbol((yyvsp[(1) - (2)].sval), pc);
@@ -2224,7 +2226,7 @@ yyreduce:
     break;
 
   case 25:
-#line 176 "parser.y"
+#line 178 "parser.y"
     { 
         if (is_conditional_active()) {
             add_symbol((yyvsp[(1) - (3)].sval), (yyvsp[(3) - (3)].ival)); 
@@ -2233,7 +2235,7 @@ yyreduce:
     break;
 
   case 26:
-#line 181 "parser.y"
+#line 183 "parser.y"
     { 
         if (is_conditional_active()) {
             add_symbol((yyvsp[(1) - (3)].sval), (yyvsp[(3) - (3)].ival)); 
@@ -2242,7 +2244,7 @@ yyreduce:
     break;
 
   case 27:
-#line 186 "parser.y"
+#line 188 "parser.y"
     { 
         if (is_conditional_active()) {
             add_symbol((yyvsp[(1) - (3)].sval), pc); 
@@ -2251,7 +2253,7 @@ yyreduce:
     break;
 
   case 28:
-#line 194 "parser.y"
+#line 196 "parser.y"
     { 
         if (is_conditional_active()) {
             /* *= only sets PC, not org_address (org_address is set by first .ORG) */
@@ -2264,57 +2266,57 @@ yyreduce:
     break;
 
   case 37:
-#line 217 "parser.y"
+#line 219 "parser.y"
     { emit_opcode(0x00); ;}
     break;
 
   case 38:
-#line 218 "parser.y"
+#line 220 "parser.y"
     { emit_opcode(0x18); ;}
     break;
 
   case 39:
-#line 219 "parser.y"
+#line 221 "parser.y"
     { emit_opcode(0xD8); ;}
     break;
 
   case 40:
-#line 220 "parser.y"
+#line 222 "parser.y"
     { emit_opcode(0x58); ;}
     break;
 
   case 41:
-#line 221 "parser.y"
+#line 223 "parser.y"
     { emit_opcode(0xB8); ;}
     break;
 
   case 42:
-#line 222 "parser.y"
+#line 224 "parser.y"
     { emit_opcode(0xCA); ;}
     break;
 
   case 43:
-#line 223 "parser.y"
+#line 225 "parser.y"
     { emit_opcode(0x88); ;}
     break;
 
   case 44:
-#line 224 "parser.y"
+#line 226 "parser.y"
     { emit_opcode(0xE8); ;}
     break;
 
   case 45:
-#line 225 "parser.y"
+#line 227 "parser.y"
     { emit_opcode(0xC8); ;}
     break;
 
   case 46:
-#line 226 "parser.y"
+#line 228 "parser.y"
     { emit_opcode(0xEA); ;}
     break;
 
   case 47:
-#line 227 "parser.y"
+#line 229 "parser.y"
     { 
         emit_opcode(0x48);
         extern char *yyfilename;
@@ -2323,12 +2325,12 @@ yyreduce:
     break;
 
   case 48:
-#line 232 "parser.y"
+#line 234 "parser.y"
     { emit_opcode(0x08); ;}
     break;
 
   case 49:
-#line 233 "parser.y"
+#line 235 "parser.y"
     { 
         emit_opcode(0x68);
         extern char *yyfilename;
@@ -2337,377 +2339,377 @@ yyreduce:
     break;
 
   case 50:
-#line 238 "parser.y"
+#line 240 "parser.y"
     { emit_opcode(0x28); ;}
     break;
 
   case 51:
-#line 239 "parser.y"
+#line 241 "parser.y"
     { emit_opcode(0x40); ;}
     break;
 
   case 52:
-#line 240 "parser.y"
+#line 242 "parser.y"
     { emit_opcode(0x40); ;}
     break;
 
   case 53:
-#line 241 "parser.y"
-    { emit_opcode(0x60); ;}
-    break;
-
-  case 54:
-#line 242 "parser.y"
-    { emit_opcode(0x60); ;}
-    break;
-
-  case 55:
 #line 243 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 56:
+  case 54:
 #line 244 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 57:
+  case 55:
 #line 245 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 58:
+  case 56:
 #line 246 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 59:
+  case 57:
 #line 247 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 60:
+  case 58:
 #line 248 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 61:
+  case 59:
 #line 249 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 62:
+  case 60:
 #line 250 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 63:
+  case 61:
 #line 251 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 64:
+  case 62:
 #line 252 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 65:
+  case 63:
 #line 253 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 66:
+  case 64:
 #line 254 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 67:
+  case 65:
 #line 255 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 68:
+  case 66:
 #line 256 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 69:
+  case 67:
 #line 257 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 70:
+  case 68:
 #line 258 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 71:
+  case 69:
 #line 259 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 72:
+  case 70:
 #line 260 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 73:
+  case 71:
 #line 261 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 74:
+  case 72:
 #line 262 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 75:
+  case 73:
 #line 263 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 76:
+  case 74:
 #line 264 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 77:
+  case 75:
 #line 265 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 78:
+  case 76:
 #line 266 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 79:
+  case 77:
 #line 267 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 80:
+  case 78:
 #line 268 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 81:
+  case 79:
 #line 269 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 82:
+  case 80:
 #line 270 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 83:
+  case 81:
 #line 271 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 84:
+  case 82:
 #line 272 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 85:
+  case 83:
 #line 273 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 86:
+  case 84:
 #line 274 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 87:
+  case 85:
 #line 275 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 88:
+  case 86:
 #line 276 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 89:
+  case 87:
 #line 277 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 90:
+  case 88:
 #line 278 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 91:
+  case 89:
 #line 279 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 92:
+  case 90:
 #line 280 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 93:
+  case 91:
 #line 281 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 94:
+  case 92:
 #line 282 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 95:
+  case 93:
 #line 283 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 96:
+  case 94:
 #line 284 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 97:
+  case 95:
 #line 285 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 98:
+  case 96:
 #line 286 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 99:
+  case 97:
 #line 287 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 100:
+  case 98:
 #line 288 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 101:
+  case 99:
 #line 289 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 102:
+  case 100:
 #line 290 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 103:
+  case 101:
 #line 291 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 104:
+  case 102:
 #line 292 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 105:
+  case 103:
 #line 293 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 106:
+  case 104:
 #line 294 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 107:
+  case 105:
 #line 295 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 108:
+  case 106:
 #line 296 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 109:
+  case 107:
 #line 297 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 110:
+  case 108:
 #line 298 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 111:
+  case 109:
 #line 299 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 112:
+  case 110:
 #line 300 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 113:
+  case 111:
 #line 301 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 114:
+  case 112:
 #line 302 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 115:
+  case 113:
 #line 303 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 116:
+  case 114:
 #line 304 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 117:
+  case 115:
 #line 305 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 118:
+  case 116:
 #line 306 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 119:
+  case 117:
 #line 307 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 120:
+  case 118:
 #line 308 "parser.y"
     { emit_opcode(0x60); ;}
     break;
 
-  case 121:
+  case 119:
 #line 309 "parser.y"
+    { emit_opcode(0x60); ;}
+    break;
+
+  case 120:
+#line 310 "parser.y"
+    { emit_opcode(0x60); ;}
+    break;
+
+  case 121:
+#line 311 "parser.y"
     { emit_opcode(0x38); ;}
     break;
 
   case 122:
-#line 310 "parser.y"
+#line 312 "parser.y"
     { emit_opcode(0xF8); ;}
     break;
 
   case 123:
-#line 311 "parser.y"
+#line 313 "parser.y"
     { emit_opcode(0x78); ;}
     break;
 
   case 124:
-#line 312 "parser.y"
+#line 314 "parser.y"
     { 
         emit_opcode(0xAA);
         extern char *yyfilename;
@@ -2716,7 +2718,7 @@ yyreduce:
     break;
 
   case 125:
-#line 317 "parser.y"
+#line 319 "parser.y"
     { 
         emit_opcode(0xA8);
         extern char *yyfilename;
@@ -2725,47 +2727,47 @@ yyreduce:
     break;
 
   case 126:
-#line 322 "parser.y"
+#line 324 "parser.y"
     { emit_opcode(0xBA); ;}
     break;
 
   case 127:
-#line 323 "parser.y"
+#line 325 "parser.y"
     { emit_opcode(0x8A); ;}
     break;
 
   case 128:
-#line 324 "parser.y"
+#line 326 "parser.y"
     { emit_opcode(0x9A); ;}
     break;
 
   case 129:
-#line 325 "parser.y"
+#line 327 "parser.y"
     { emit_opcode(0x98); ;}
     break;
 
   case 130:
-#line 329 "parser.y"
+#line 331 "parser.y"
     { emit_opcode(0x0A); ;}
     break;
 
   case 131:
-#line 330 "parser.y"
+#line 332 "parser.y"
     { emit_opcode(0x4A); ;}
     break;
 
   case 132:
-#line 331 "parser.y"
+#line 333 "parser.y"
     { emit_opcode(0x2A); ;}
     break;
 
   case 133:
-#line 332 "parser.y"
+#line 334 "parser.y"
     { emit_opcode(0x6A); ;}
     break;
 
   case 134:
-#line 336 "parser.y"
+#line 338 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0x69); 
@@ -2780,7 +2782,7 @@ yyreduce:
     break;
 
   case 135:
-#line 347 "parser.y"
+#line 349 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0x29); 
@@ -2795,7 +2797,7 @@ yyreduce:
     break;
 
   case 136:
-#line 358 "parser.y"
+#line 360 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0xC9); 
@@ -2808,7 +2810,7 @@ yyreduce:
     break;
 
   case 137:
-#line 367 "parser.y"
+#line 369 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0xE0); 
@@ -2821,7 +2823,7 @@ yyreduce:
     break;
 
   case 138:
-#line 376 "parser.y"
+#line 378 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0xC0); 
@@ -2834,7 +2836,7 @@ yyreduce:
     break;
 
   case 139:
-#line 385 "parser.y"
+#line 387 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0x49); 
@@ -2847,7 +2849,7 @@ yyreduce:
     break;
 
   case 140:
-#line 394 "parser.y"
+#line 396 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0xA9); 
@@ -2862,7 +2864,7 @@ yyreduce:
     break;
 
   case 141:
-#line 405 "parser.y"
+#line 407 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0xA2); 
@@ -2875,7 +2877,7 @@ yyreduce:
     break;
 
   case 142:
-#line 414 "parser.y"
+#line 416 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0xA0); 
@@ -2888,7 +2890,7 @@ yyreduce:
     break;
 
   case 143:
-#line 423 "parser.y"
+#line 425 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0x09); 
@@ -2903,7 +2905,7 @@ yyreduce:
     break;
 
   case 144:
-#line 434 "parser.y"
+#line 436 "parser.y"
     { 
         uint8_t val = eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF;
         emit_opcode(0xE9); 
@@ -2918,7 +2920,7 @@ yyreduce:
     break;
 
   case 145:
-#line 448 "parser.y"
+#line 450 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0x65, 0x6D, (yyvsp[(2) - (2)].sval));
@@ -2927,7 +2929,7 @@ yyreduce:
     break;
 
   case 146:
-#line 453 "parser.y"
+#line 455 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0x25, 0x2D, (yyvsp[(2) - (2)].sval));
@@ -2939,7 +2941,7 @@ yyreduce:
     break;
 
   case 147:
-#line 461 "parser.y"
+#line 463 "parser.y"
     { 
         /* Check if expression is just "A" - if so, use accumulator form */
         if ((yyvsp[(2) - (2)].sval) && strcasecmp((yyvsp[(2) - (2)].sval), "A") == 0) {
@@ -2951,12 +2953,12 @@ yyreduce:
     break;
 
   case 148:
-#line 469 "parser.y"
+#line 471 "parser.y"
     { emit_addr(0x24, 0x2C, (yyvsp[(2) - (2)].sval)); ;}
     break;
 
   case 149:
-#line 470 "parser.y"
+#line 472 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0xC5, 0xCD, (yyvsp[(2) - (2)].sval));
@@ -2965,7 +2967,7 @@ yyreduce:
     break;
 
   case 150:
-#line 475 "parser.y"
+#line 477 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0xE4, 0xEC, (yyvsp[(2) - (2)].sval));
@@ -2974,7 +2976,7 @@ yyreduce:
     break;
 
   case 151:
-#line 480 "parser.y"
+#line 482 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0xC4, 0xCC, (yyvsp[(2) - (2)].sval));
@@ -2983,12 +2985,12 @@ yyreduce:
     break;
 
   case 152:
-#line 485 "parser.y"
+#line 487 "parser.y"
     { emit_addr(0xC6, 0xCE, (yyvsp[(2) - (2)].sval)); ;}
     break;
 
   case 153:
-#line 486 "parser.y"
+#line 488 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0x45, 0x4D, (yyvsp[(2) - (2)].sval));
@@ -2997,12 +2999,12 @@ yyreduce:
     break;
 
   case 154:
-#line 491 "parser.y"
+#line 493 "parser.y"
     { emit_addr(0xE6, 0xEE, (yyvsp[(2) - (2)].sval)); ;}
     break;
 
   case 155:
-#line 492 "parser.y"
+#line 494 "parser.y"
     { 
         if (pass == 2) {
             uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3018,7 +3020,7 @@ yyreduce:
     break;
 
   case 156:
-#line 504 "parser.y"
+#line 506 "parser.y"
     { 
         if (pass == 2) {
             uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3032,7 +3034,7 @@ yyreduce:
     break;
 
   case 157:
-#line 514 "parser.y"
+#line 516 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0xA5, 0xAD, (yyvsp[(2) - (2)].sval));
@@ -3044,7 +3046,7 @@ yyreduce:
     break;
 
   case 158:
-#line 522 "parser.y"
+#line 524 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0xA6, 0xAE, (yyvsp[(2) - (2)].sval));
@@ -3053,7 +3055,7 @@ yyreduce:
     break;
 
   case 159:
-#line 527 "parser.y"
+#line 529 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0xA4, 0xAC, (yyvsp[(2) - (2)].sval));
@@ -3062,7 +3064,7 @@ yyreduce:
     break;
 
   case 160:
-#line 532 "parser.y"
+#line 534 "parser.y"
     { 
         /* Check if expression is just "A" - if so, use accumulator form */
         if ((yyvsp[(2) - (2)].sval) && strcasecmp((yyvsp[(2) - (2)].sval), "A") == 0) {
@@ -3074,7 +3076,7 @@ yyreduce:
     break;
 
   case 161:
-#line 540 "parser.y"
+#line 542 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0x05, 0x0D, (yyvsp[(2) - (2)].sval));
@@ -3086,7 +3088,7 @@ yyreduce:
     break;
 
   case 162:
-#line 548 "parser.y"
+#line 550 "parser.y"
     { 
         /* Check if expression is just "A" - if so, use accumulator form */
         if ((yyvsp[(2) - (2)].sval) && strcasecmp((yyvsp[(2) - (2)].sval), "A") == 0) {
@@ -3098,7 +3100,7 @@ yyreduce:
     break;
 
   case 163:
-#line 556 "parser.y"
+#line 558 "parser.y"
     { 
         /* Check if expression is just "A" - if so, use accumulator form */
         if ((yyvsp[(2) - (2)].sval) && strcasecmp((yyvsp[(2) - (2)].sval), "A") == 0) {
@@ -3110,7 +3112,7 @@ yyreduce:
     break;
 
   case 164:
-#line 564 "parser.y"
+#line 566 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0xE5, 0xED, (yyvsp[(2) - (2)].sval));
@@ -3119,7 +3121,7 @@ yyreduce:
     break;
 
   case 165:
-#line 569 "parser.y"
+#line 571 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0x85, 0x8D, (yyvsp[(2) - (2)].sval));
@@ -3134,7 +3136,7 @@ yyreduce:
     break;
 
   case 166:
-#line 580 "parser.y"
+#line 582 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0x86, 0x8E, (yyvsp[(2) - (2)].sval));
@@ -3143,7 +3145,7 @@ yyreduce:
     break;
 
   case 167:
-#line 585 "parser.y"
+#line 587 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         emit_addr(0x84, 0x8C, (yyvsp[(2) - (2)].sval));
@@ -3152,62 +3154,62 @@ yyreduce:
     break;
 
   case 168:
-#line 593 "parser.y"
+#line 595 "parser.y"
     { emit_indexed(0x75, 0x7D, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 169:
-#line 594 "parser.y"
+#line 596 "parser.y"
     { emit_indexed(0x79, 0x79, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 170:
-#line 595 "parser.y"
+#line 597 "parser.y"
     { emit_indexed(0x35, 0x3D, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 171:
-#line 596 "parser.y"
+#line 598 "parser.y"
     { emit_indexed(0x39, 0x39, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 172:
-#line 597 "parser.y"
+#line 599 "parser.y"
     { emit_indexed(0x16, 0x1E, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 173:
-#line 598 "parser.y"
+#line 600 "parser.y"
     { emit_indexed(0xD5, 0xDD, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 174:
-#line 599 "parser.y"
+#line 601 "parser.y"
     { emit_indexed(0xD9, 0xD9, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 175:
-#line 600 "parser.y"
+#line 602 "parser.y"
     { emit_indexed(0xD6, 0xDE, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 176:
-#line 601 "parser.y"
+#line 603 "parser.y"
     { emit_indexed(0x55, 0x5D, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 177:
-#line 602 "parser.y"
+#line 604 "parser.y"
     { emit_indexed(0x59, 0x59, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 178:
-#line 603 "parser.y"
+#line 605 "parser.y"
     { emit_indexed(0xF6, 0xFE, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 179:
-#line 604 "parser.y"
+#line 606 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (4)].sval));
         emit_indexed(0xB5, 0xBD, (yyvsp[(2) - (4)].sval));
@@ -3218,7 +3220,7 @@ yyreduce:
     break;
 
   case 180:
-#line 611 "parser.y"
+#line 613 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (4)].sval));
         emit_indexed(0xB9, 0xB9, (yyvsp[(2) - (4)].sval));
@@ -3228,52 +3230,52 @@ yyreduce:
     break;
 
   case 181:
-#line 617 "parser.y"
+#line 619 "parser.y"
     { emit_indexed(0xB6, 0xBE, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 182:
-#line 618 "parser.y"
+#line 620 "parser.y"
     { emit_indexed(0xB4, 0xBC, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 183:
-#line 619 "parser.y"
+#line 621 "parser.y"
     { emit_indexed(0x56, 0x5E, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 184:
-#line 620 "parser.y"
+#line 622 "parser.y"
     { emit_indexed(0x15, 0x1D, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 185:
-#line 621 "parser.y"
+#line 623 "parser.y"
     { emit_indexed(0x19, 0x19, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 186:
-#line 622 "parser.y"
+#line 624 "parser.y"
     { emit_indexed(0x36, 0x3E, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 187:
-#line 623 "parser.y"
+#line 625 "parser.y"
     { emit_indexed(0x76, 0x7E, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 188:
-#line 624 "parser.y"
+#line 626 "parser.y"
     { emit_indexed(0xF5, 0xFD, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 189:
-#line 625 "parser.y"
+#line 627 "parser.y"
     { emit_indexed(0xF9, 0xF9, (yyvsp[(2) - (4)].sval)); ;}
     break;
 
   case 190:
-#line 626 "parser.y"
+#line 628 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (4)].sval));
         emit_indexed(0x95, 0x9D, (yyvsp[(2) - (4)].sval));
@@ -3284,7 +3286,7 @@ yyreduce:
     break;
 
   case 191:
-#line 633 "parser.y"
+#line 635 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (4)].sval));
         emit_indexed(0x99, 0x99, (yyvsp[(2) - (4)].sval));
@@ -3294,7 +3296,7 @@ yyreduce:
     break;
 
   case 192:
-#line 639 "parser.y"
+#line 641 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (4)].sval));
         if (addr >= 256) {
@@ -3306,7 +3308,7 @@ yyreduce:
     break;
 
   case 193:
-#line 647 "parser.y"
+#line 649 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (4)].sval));
         if (addr >= 256) {
@@ -3318,7 +3320,7 @@ yyreduce:
     break;
 
   case 194:
-#line 658 "parser.y"
+#line 660 "parser.y"
     { 
         if (pass == 2) {
             emit_opcode(0x6C);
@@ -3331,87 +3333,87 @@ yyreduce:
     break;
 
   case 195:
-#line 667 "parser.y"
+#line 669 "parser.y"
     { emit_opcode(0x61); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 196:
-#line 668 "parser.y"
+#line 670 "parser.y"
     { emit_opcode(0x21); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 197:
-#line 669 "parser.y"
+#line 671 "parser.y"
     { emit_opcode(0xC1); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 198:
-#line 670 "parser.y"
+#line 672 "parser.y"
     { emit_opcode(0x41); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 199:
-#line 671 "parser.y"
+#line 673 "parser.y"
     { emit_opcode(0xA1); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 200:
-#line 672 "parser.y"
+#line 674 "parser.y"
     { emit_opcode(0x01); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 201:
-#line 673 "parser.y"
+#line 675 "parser.y"
     { emit_opcode(0xE1); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 202:
-#line 674 "parser.y"
+#line 676 "parser.y"
     { emit_opcode(0x81); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 203:
-#line 675 "parser.y"
+#line 677 "parser.y"
     { emit_opcode(0x71); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 204:
-#line 676 "parser.y"
+#line 678 "parser.y"
     { emit_opcode(0x31); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 205:
-#line 677 "parser.y"
+#line 679 "parser.y"
     { emit_opcode(0xD1); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 206:
-#line 678 "parser.y"
+#line 680 "parser.y"
     { emit_opcode(0x51); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 207:
-#line 679 "parser.y"
+#line 681 "parser.y"
     { emit_opcode(0xB1); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 208:
-#line 680 "parser.y"
+#line 682 "parser.y"
     { emit_opcode(0x11); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 209:
-#line 681 "parser.y"
+#line 683 "parser.y"
     { emit_opcode(0xF1); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 210:
-#line 682 "parser.y"
+#line 684 "parser.y"
     { emit_opcode(0x91); emit_byte(eval_expr((yyvsp[(3) - (6)].sval)) & 0xFF); ;}
     break;
 
   case 211:
-#line 686 "parser.y"
+#line 688 "parser.y"
     { 
         if (pass == 2) {
             uint16_t target = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3430,7 +3432,7 @@ yyreduce:
     break;
 
   case 212:
-#line 701 "parser.y"
+#line 703 "parser.y"
     { 
         if (pass == 2) {
             uint16_t target = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3448,7 +3450,7 @@ yyreduce:
     break;
 
   case 213:
-#line 715 "parser.y"
+#line 717 "parser.y"
     { 
         if (pass == 2) {
             uint16_t target = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3466,7 +3468,7 @@ yyreduce:
     break;
 
   case 214:
-#line 729 "parser.y"
+#line 731 "parser.y"
     { 
         if (pass == 2) {
             uint16_t target = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3484,7 +3486,7 @@ yyreduce:
     break;
 
   case 215:
-#line 743 "parser.y"
+#line 745 "parser.y"
     { 
         if (pass == 2) {
             uint16_t target = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3502,7 +3504,7 @@ yyreduce:
     break;
 
   case 216:
-#line 757 "parser.y"
+#line 759 "parser.y"
     { 
         if (pass == 2) {
             uint16_t target = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3520,7 +3522,7 @@ yyreduce:
     break;
 
   case 217:
-#line 771 "parser.y"
+#line 773 "parser.y"
     { 
         if (pass == 2) {
             uint16_t target = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3538,7 +3540,7 @@ yyreduce:
     break;
 
   case 218:
-#line 785 "parser.y"
+#line 787 "parser.y"
     { 
         if (pass == 2) {
             uint16_t target = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3556,7 +3558,7 @@ yyreduce:
     break;
 
   case 219:
-#line 802 "parser.y"
+#line 804 "parser.y"
     { 
         if (pass == 2) {
             uint16_t target = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3574,37 +3576,37 @@ yyreduce:
     break;
 
   case 220:
-#line 816 "parser.y"
+#line 818 "parser.y"
     { emit_opcode(0xDA); ;}
     break;
 
   case 221:
-#line 817 "parser.y"
+#line 819 "parser.y"
     { emit_opcode(0x5A); ;}
     break;
 
   case 222:
-#line 818 "parser.y"
+#line 820 "parser.y"
     { emit_opcode(0xFA); ;}
     break;
 
   case 223:
-#line 819 "parser.y"
+#line 821 "parser.y"
     { emit_opcode(0x7A); ;}
     break;
 
   case 224:
-#line 820 "parser.y"
+#line 822 "parser.y"
     { emit_opcode(0xCB); ;}
     break;
 
   case 225:
-#line 821 "parser.y"
+#line 823 "parser.y"
     { emit_opcode(0xDB); ;}
     break;
 
   case 226:
-#line 822 "parser.y"
+#line 824 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         if (addr < 256) {
@@ -3618,7 +3620,7 @@ yyreduce:
     break;
 
   case 227:
-#line 832 "parser.y"
+#line 834 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (4)].sval));
         if (addr < 256) {
@@ -3632,7 +3634,7 @@ yyreduce:
     break;
 
   case 228:
-#line 842 "parser.y"
+#line 844 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         if (addr < 256) {
@@ -3646,7 +3648,7 @@ yyreduce:
     break;
 
   case 229:
-#line 852 "parser.y"
+#line 854 "parser.y"
     { 
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
         if (addr < 256) {
@@ -3660,12 +3662,12 @@ yyreduce:
     break;
 
   case 230:
-#line 865 "parser.y"
+#line 867 "parser.y"
     { org_address = eval_expr((yyvsp[(2) - (2)].sval)); pc = org_address; ;}
     break;
 
   case 231:
-#line 866 "parser.y"
+#line 868 "parser.y"
     { 
         uint16_t new_pc = eval_expr((yyvsp[(2) - (2)].sval));
         /* *= only sets PC, not org_address (org_address is set by first .ORG) */
@@ -3677,62 +3679,62 @@ yyreduce:
     break;
 
   case 232:
-#line 874 "parser.y"
+#line 876 "parser.y"
     { /* byte_list handles emitting */ ;}
     break;
 
   case 233:
-#line 875 "parser.y"
+#line 877 "parser.y"
     { /* word_list handles emitting */ ;}
     break;
 
   case 234:
-#line 876 "parser.y"
+#line 878 "parser.y"
     { pc += eval_expr((yyvsp[(2) - (2)].sval)); ;}
     break;
 
   case 235:
-#line 877 "parser.y"
+#line 879 "parser.y"
     { /* .EQU handled in assignment rule */ ;}
     break;
 
   case 236:
-#line 878 "parser.y"
+#line 880 "parser.y"
     { /* Page break - no-op */ ;}
     break;
 
   case 237:
-#line 879 "parser.y"
+#line 881 "parser.y"
     { /* Title directive - no-op, ignore the string (handled as any expression) */ ;}
     break;
 
   case 238:
-#line 880 "parser.y"
+#line 882 "parser.y"
     { /* List directive - no-op, ignore the parameter */ ;}
     break;
 
   case 239:
-#line 881 "parser.y"
+#line 883 "parser.y"
     { /* List directive with parameter - no-op, ignore parameter */ ;}
     break;
 
   case 240:
-#line 882 "parser.y"
+#line 884 "parser.y"
     { /* List directive with X parameter - no-op, ignore parameter */ ;}
     break;
 
   case 241:
-#line 883 "parser.y"
+#line 885 "parser.y"
     { /* List directive with Y parameter - no-op, ignore parameter */ ;}
     break;
 
   case 242:
-#line 884 "parser.y"
+#line 886 "parser.y"
     { /* List directive with expression - no-op, ignore parameter */ ;}
     break;
 
   case 243:
-#line 885 "parser.y"
+#line 887 "parser.y"
     { 
         if (pass == 2) {
             YYACCEPT;  /* End of file - stop parsing in pass 2 only */
@@ -3742,7 +3744,7 @@ yyreduce:
     break;
 
   case 244:
-#line 894 "parser.y"
+#line 896 "parser.y"
     { 
         if (is_conditional_active()) {
             emit_byte(eval_expr((yyvsp[(1) - (1)].sval)) & 0xFF); 
@@ -3751,7 +3753,7 @@ yyreduce:
     break;
 
   case 245:
-#line 899 "parser.y"
+#line 901 "parser.y"
     { 
         if (is_conditional_active()) {
             emit_byte(eval_expr((yyvsp[(3) - (3)].sval)) & 0xFF); 
@@ -3760,7 +3762,7 @@ yyreduce:
     break;
 
   case 246:
-#line 907 "parser.y"
+#line 909 "parser.y"
     { 
         if (is_conditional_active()) {
             emit_word(eval_expr((yyvsp[(1) - (1)].sval))); 
@@ -3769,7 +3771,7 @@ yyreduce:
     break;
 
   case 247:
-#line 912 "parser.y"
+#line 914 "parser.y"
     { 
         if (is_conditional_active()) {
             emit_word(eval_expr((yyvsp[(3) - (3)].sval))); 
@@ -3778,7 +3780,7 @@ yyreduce:
     break;
 
   case 248:
-#line 920 "parser.y"
+#line 922 "parser.y"
     { 
         start_macro_definition((yyvsp[(2) - (3)].sval));
         /* Read lines until ENDM - we need to read from the file directly */
@@ -3810,12 +3812,12 @@ yyreduce:
     break;
 
   case 249:
-#line 948 "parser.y"
+#line 950 "parser.y"
     { /* This handles ENDM when not in a macro definition (error case) */ ;}
     break;
 
   case 250:
-#line 952 "parser.y"
+#line 954 "parser.y"
     { 
         macro_t *m = get_macro((yyvsp[(1) - (1)].sval));
         if (m) {
@@ -3835,22 +3837,22 @@ yyreduce:
     break;
 
   case 251:
-#line 971 "parser.y"
-    { (yyval.sval) = (yyvsp[(1) - (1)].sval); ;}
-    break;
-
-  case 252:
-#line 972 "parser.y"
-    { (yyval.sval) = (yyvsp[(1) - (1)].sval); ;}
-    break;
-
-  case 253:
 #line 973 "parser.y"
     { (yyval.sval) = (yyvsp[(1) - (1)].sval); ;}
     break;
 
-  case 254:
+  case 252:
 #line 974 "parser.y"
+    { (yyval.sval) = (yyvsp[(1) - (1)].sval); ;}
+    break;
+
+  case 253:
+#line 975 "parser.y"
+    { (yyval.sval) = (yyvsp[(1) - (1)].sval); ;}
+    break;
+
+  case 254:
+#line 976 "parser.y"
     { 
         /* Current location counter - convert to string */
         char *result = malloc(16);
@@ -3860,7 +3862,7 @@ yyreduce:
     break;
 
   case 255:
-#line 980 "parser.y"
+#line 982 "parser.y"
     {
         /* Extract low byte of address */
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3872,7 +3874,7 @@ yyreduce:
     break;
 
   case 256:
-#line 988 "parser.y"
+#line 990 "parser.y"
     {
         /* Extract high byte of address */
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
@@ -3884,7 +3886,7 @@ yyreduce:
     break;
 
   case 257:
-#line 996 "parser.y"
+#line 998 "parser.y"
     { 
         uint16_t val = eval_expr((yyvsp[(2) - (2)].sval));
         int16_t neg_val = -(int16_t)val;
@@ -3898,12 +3900,12 @@ yyreduce:
     break;
 
   case 258:
-#line 1006 "parser.y"
+#line 1008 "parser.y"
     { (yyval.sval) = (yyvsp[(2) - (2)].sval); ;}
     break;
 
   case 259:
-#line 1007 "parser.y"
+#line 1009 "parser.y"
     { 
         uint16_t left = eval_expr((yyvsp[(1) - (3)].sval));
         uint16_t right = eval_expr((yyvsp[(3) - (3)].sval));
@@ -3914,7 +3916,7 @@ yyreduce:
     break;
 
   case 260:
-#line 1014 "parser.y"
+#line 1016 "parser.y"
     { 
         uint16_t left = eval_expr((yyvsp[(1) - (3)].sval));
         uint16_t right = eval_expr((yyvsp[(3) - (3)].sval));
@@ -3925,7 +3927,7 @@ yyreduce:
     break;
 
   case 261:
-#line 1021 "parser.y"
+#line 1023 "parser.y"
     { 
         uint16_t left = eval_expr((yyvsp[(1) - (3)].sval));
         uint16_t right = eval_expr((yyvsp[(3) - (3)].sval));
@@ -3936,7 +3938,7 @@ yyreduce:
     break;
 
   case 262:
-#line 1028 "parser.y"
+#line 1030 "parser.y"
     { 
         uint16_t left = eval_expr((yyvsp[(1) - (3)].sval));
         uint16_t right = eval_expr((yyvsp[(3) - (3)].sval));
@@ -3951,7 +3953,7 @@ yyreduce:
     break;
 
   case 263:
-#line 1039 "parser.y"
+#line 1041 "parser.y"
     {
         uint16_t left = eval_expr((yyvsp[(1) - (3)].sval));
         uint16_t right = eval_expr((yyvsp[(3) - (3)].sval));
@@ -3968,7 +3970,7 @@ yyreduce:
     break;
 
   case 264:
-#line 1052 "parser.y"
+#line 1054 "parser.y"
     {
         uint16_t left = eval_expr((yyvsp[(1) - (3)].sval));
         uint16_t right = eval_expr((yyvsp[(3) - (3)].sval));
@@ -3985,32 +3987,32 @@ yyreduce:
     break;
 
   case 265:
-#line 1065 "parser.y"
+#line 1067 "parser.y"
     { (yyval.sval) = (yyvsp[(2) - (3)].sval); ;}
     break;
 
   case 266:
-#line 1069 "parser.y"
-    { (yyval.ival) = eval_expr((yyvsp[(1) - (1)].sval)); ;}
-    break;
-
-  case 267:
-#line 1070 "parser.y"
-    { (yyval.ival) = eval_expr((yyvsp[(1) - (1)].sval)); ;}
-    break;
-
-  case 268:
 #line 1071 "parser.y"
     { (yyval.ival) = eval_expr((yyvsp[(1) - (1)].sval)); ;}
     break;
 
-  case 269:
+  case 267:
 #line 1072 "parser.y"
+    { (yyval.ival) = eval_expr((yyvsp[(1) - (1)].sval)); ;}
+    break;
+
+  case 268:
+#line 1073 "parser.y"
+    { (yyval.ival) = eval_expr((yyvsp[(1) - (1)].sval)); ;}
+    break;
+
+  case 269:
+#line 1074 "parser.y"
     { (yyval.ival) = pc; ;}
     break;
 
   case 270:
-#line 1073 "parser.y"
+#line 1075 "parser.y"
     {
         /* Extract low byte of address */
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
@@ -4019,7 +4021,7 @@ yyreduce:
     break;
 
   case 271:
-#line 1078 "parser.y"
+#line 1080 "parser.y"
     {
         /* Extract high byte of address */
         uint16_t addr = eval_expr((yyvsp[(2) - (2)].sval));
@@ -4028,32 +4030,32 @@ yyreduce:
     break;
 
   case 272:
-#line 1083 "parser.y"
+#line 1085 "parser.y"
     { (yyval.ival) = -(yyvsp[(2) - (2)].ival); ;}
     break;
 
   case 273:
-#line 1084 "parser.y"
+#line 1086 "parser.y"
     { (yyval.ival) = (yyvsp[(2) - (2)].ival); ;}
     break;
 
   case 274:
-#line 1085 "parser.y"
+#line 1087 "parser.y"
     { (yyval.ival) = (yyvsp[(1) - (3)].ival) + (yyvsp[(3) - (3)].ival); ;}
     break;
 
   case 275:
-#line 1086 "parser.y"
+#line 1088 "parser.y"
     { (yyval.ival) = (yyvsp[(1) - (3)].ival) - (yyvsp[(3) - (3)].ival); ;}
     break;
 
   case 276:
-#line 1087 "parser.y"
+#line 1089 "parser.y"
     { (yyval.ival) = (yyvsp[(1) - (3)].ival) * (yyvsp[(3) - (3)].ival); ;}
     break;
 
   case 277:
-#line 1088 "parser.y"
+#line 1090 "parser.y"
     { 
         if ((yyvsp[(3) - (3)].ival) == 0) {
             fprintf(stderr, "Error: Division by zero\n");
@@ -4065,27 +4067,27 @@ yyreduce:
     break;
 
   case 278:
-#line 1096 "parser.y"
+#line 1098 "parser.y"
     {
         (yyval.ival) = (yyvsp[(1) - (3)].ival) & (yyvsp[(3) - (3)].ival);
     ;}
     break;
 
   case 279:
-#line 1099 "parser.y"
+#line 1101 "parser.y"
     {
         (yyval.ival) = (yyvsp[(1) - (3)].ival) | (yyvsp[(3) - (3)].ival);
     ;}
     break;
 
   case 280:
-#line 1102 "parser.y"
+#line 1104 "parser.y"
     { (yyval.ival) = (yyvsp[(2) - (3)].ival); ;}
     break;
 
 
 /* Line 1267 of yacc.c.  */
-#line 4089 "parser.tab.c"
+#line 4091 "parser.tab.c"
       default: break;
     }
   YY_SYMBOL_PRINT ("-> $$ =", yyr1[yyn], &yyval, &yyloc);
@@ -4299,7 +4301,7 @@ yyreturn:
 }
 
 
-#line 1105 "parser.y"
+#line 1107 "parser.y"
 
 
 void yyerror(const char *s) {
@@ -4385,6 +4387,11 @@ void emit_byte(uint8_t byte) {
 void emit_opcode(uint8_t opcode) {
     if (!is_conditional_active()) return;  /* Skip if in false conditional block */
     stats_record_opcode(opcode);
+    if (pass == 2) {
+        /* Track opcode address range */
+        if (pc < min_opcode_address) min_opcode_address = pc;
+        if (pc > max_opcode_address) max_opcode_address = pc;
+    }
     emit_byte(opcode);
 }
 

@@ -1,6 +1,0 @@
-    .ORG $8000
-LINBUF = $1234
-    LDA #LINBUF.AND.$FF
-    LDA #LINBUF.OR.$80
-    LDA #$55.AND.$AA
-    LDA #$55.OR.$AA
