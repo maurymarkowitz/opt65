@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>  /* for size_t */
 #include "parser.tab.h"
 %}
 
@@ -18,6 +19,10 @@
 [ \t]+                { /* ignore whitespace */ }
 
 \n                    { return NEWLINE; }
+
+ /* ignore control characters: bell (0x07) and form feed (0x0C) */
+\007                  { /* ignore bell character */ }
+\014                  { /* ignore form feed character */ }
 
  /* comment handling */
 <INITIAL,MACROBODY>";" { BEGIN(COMMENT); }
@@ -111,6 +116,7 @@
 "\.ORG"|"ORG"         { return ORG; }
 "\.BYTE"|"BYTE"       { return BYTE; }
 "\.WORD"|"WORD"       { return WORD; }
+"\.DBYTE"|"DBYTE"     { return DBYTE; }
 "\.RES"|"RES"         { return RES; }
 "\.EQU"|"EQU"         { return EQU; }
 "\.PAGE"|"PAGE"       { return PAGE; }
@@ -162,10 +168,20 @@
     return IDENTIFIER;
 }
 
- /* numbers in hex and decimal (is the octal?) */
+ /* numbers in hex, decimal, octal, and binary */
 \$[0-9A-F]+ {
     yylval.sval = strdup(yytext);
     return HEX_NUMBER;
+}
+
+@[0-7]+ {
+    yylval.sval = strdup(yytext);
+    return OCT_NUMBER;
+}
+
+![01]+ {
+    yylval.sval = strdup(yytext);
+    return BIN_NUMBER;
 }
 
 [0-9]+ {
@@ -176,6 +192,20 @@
  /* catch-all */
 . {
     fprintf(stderr, "Unknown character: '%c' at line %d\n", yytext[0], yylineno);
+}
+
+<<EOF>> {
+    extern void yypop_buffer_state(void);
+    extern size_t yy_buffer_stack_top;
+    
+    /* If we have buffers on the stack (macro expansion), pop the current one */
+    if (yy_buffer_stack_top > 0) {
+        yypop_buffer_state();
+        /* Return YY_NULL (0) to continue reading from previous buffer */
+        return 0;
+    }
+    /* No more buffers - return 0 to signal EOF to parser */
+    return 0;
 }
 
 %%
