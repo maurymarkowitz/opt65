@@ -71,6 +71,7 @@ void add_symbol(char *name, uint16_t value);
 uint16_t get_symbol(char *name);
 void emit_byte(uint8_t byte);
 void emit_word(uint16_t word);
+void emit_dbyte(uint16_t word);
 void emit_indexed(uint8_t zp_op, uint8_t abs_op, char *expr);
 void emit_addr(uint8_t zp_op, uint8_t abs_op, char *expr);
 void emit_opcode(uint8_t opcode);
@@ -87,14 +88,14 @@ void end_macro_definition(void);
     char *sval;
 }
 
-%token <sval> IDENTIFIER HEX_NUMBER DEC_NUMBER
+%token <sval> IDENTIFIER HEX_NUMBER DEC_NUMBER OCT_NUMBER BIN_NUMBER
 %token ADC AND ASL BCC BCS BEQ BIT BMI BNE BPL BRK BVC BVS
 %token CLC CLD CLI CLV CMP CPX CPY DEC DEX DEY EOR INC INX INY
 %token JMP JSR LDA LDX LDY LSR NOP ORA PHA PHP PLA PLP
 %token ROL ROR RTI RTS SBC SEC SED SEI STA STX STY
 %token TAX TAY TSX TXA TXS TYA
 %token BRA PHX PHY PLX PLY STZ TRB TSB WAI STP
-%token ORG BYTE WORD RES EQU MACRO ENDM PAGE TITLE LIST IF ENDIF END
+%token ORG BYTE WORD DBYTE RES EQU MACRO ENDM PAGE TITLE LIST IF ENDIF END
 %token LOW HIGH
 %token LT GT  /* < and > as alternatives to .LOW. and .HIGH. */
 %token AND_OP OR_OP
@@ -245,7 +246,11 @@ implied_instruction:
     | PLP { emit_opcode(0x28); }
     | RTI { emit_opcode(0x40); }
     | RTI IDENTIFIER { emit_opcode(0x40); }  /* Allow optional label annotation */
-    | RTS { emit_opcode(0x60); }
+    | RTS { 
+        emit_opcode(0x60);
+        extern char *yyfilename;
+        stats_record_instruction(0x60, "RTS", 0, yylineno, yyfilename, NULL);
+    }
     | RTS IDENTIFIER { emit_opcode(0x60); }  /* Allow optional label annotation like RTS RETURN */
     | RTS ADC { emit_opcode(0x60); }  /* Ignore any token after RTS */
     | RTS AND { emit_opcode(0x60); }  /* Ignore any token after RTS */
@@ -613,7 +618,7 @@ indexed_instruction:
         emit_indexed(0xB5, 0xBD, $2);
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0xB5 : 0xBD;
-        stats_record_instruction(op, "LDA", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "LDA", addr, yylineno, yyfilename, $2);
     }
     | LDA expression COMMA YREG { 
         uint16_t addr = eval_expr($2);
@@ -880,6 +885,7 @@ directive:
     }
     | BYTE byte_list { /* byte_list handles emitting */ }
     | WORD word_list { /* word_list handles emitting */ }
+    | DBYTE dbyte_list { /* dbyte_list handles emitting */ }
     | RES expression { pc += eval_expr($2); }
     | EQU expression { /* .EQU handled in assignment rule */ }
     | PAGE { /* Page break - no-op */ }
@@ -919,6 +925,19 @@ word_list:
     | word_list COMMA expression { 
         if (is_conditional_active()) {
             emit_word(eval_expr($3)); 
+        }
+    }
+    ;
+
+dbyte_list:
+    expression { 
+        if (is_conditional_active()) {
+            emit_dbyte(eval_expr($1)); 
+        }
+    }
+    | dbyte_list COMMA expression { 
+        if (is_conditional_active()) {
+            emit_dbyte(eval_expr($3)); 
         }
     }
     ;
@@ -967,6 +986,7 @@ macro_invocation:
             yypush_buffer_state(macro_buffer);
             /* The lexer will now read from the macro body */
             /* Continue parsing - the macro body will be parsed as regular lines */
+            /* Buffer will be popped automatically by Flex when exhausted */
         } else {
             /* Not a macro - treat as error for now */
             fprintf(stderr, "Error: Unknown identifier '%s' (not a macro or label) at line %d\n", $1, yylineno);
@@ -978,6 +998,8 @@ expression:
     IDENTIFIER { $$ = $1; }
     | HEX_NUMBER { $$ = $1; }
     | DEC_NUMBER { $$ = $1; }
+    | OCT_NUMBER { $$ = $1; }
+    | BIN_NUMBER { $$ = $1; }
     | MULTIPLY { 
         /* Current location counter - convert to string */
         char *result = malloc(16);
@@ -1092,6 +1114,8 @@ expr_value:
     IDENTIFIER { $$ = eval_expr($1); }
     | HEX_NUMBER { $$ = eval_expr($1); }
     | DEC_NUMBER { $$ = eval_expr($1); }
+    | OCT_NUMBER { $$ = eval_expr($1); }
+    | BIN_NUMBER { $$ = eval_expr($1); }
     | MULTIPLY { $$ = pc; }  /* Current location counter */
     | LOW IDENTIFIER {
         /* Extract low byte of address */
@@ -1147,6 +1171,16 @@ uint16_t eval_expr(char *expr) {
     /* Check if it's a hex number */
     if (expr[0] == '$') {
         return (uint16_t)strtol(expr + 1, NULL, 16);
+    }
+    
+    /* Check if it's an octal number */
+    if (expr[0] == '@') {
+        return (uint16_t)strtol(expr + 1, NULL, 8);
+    }
+    
+    /* Check if it's a binary number */
+    if (expr[0] == '!') {
+        return (uint16_t)strtol(expr + 1, NULL, 2);
     }
     
     /* Check if it's a decimal number */
@@ -1233,6 +1267,11 @@ void emit_opcode(uint8_t opcode) {
 void emit_word(uint16_t word) {
     emit_byte(word & 0xFF);
     emit_byte((word >> 8) & 0xFF);
+}
+
+void emit_dbyte(uint16_t word) {
+    emit_byte((word >> 8) & 0xFF);  /* High byte first */
+    emit_byte(word & 0xFF);         /* Low byte second */
 }
 
 void emit_indexed(uint8_t zp_op, uint8_t abs_op, char *expr) {

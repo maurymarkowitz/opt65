@@ -228,12 +228,30 @@ static int get_opcode_size(uint8_t opcode) {
     return 2;
 }
 
+/* Track PC at start of instruction for size calculation */
+static uint16_t instruction_start_pc = 0xFFFF;
+
 void stats_record_opcode(uint8_t opcode) {
+    extern uint16_t pc;
+    if (instruction_start_pc == 0xFFFF) {
+        instruction_start_pc = pc;  /* Record PC before opcode is emitted */
+    }
     opcode_counts[opcode]++;
     total_opcodes++;
-    total_opcode_bytes += get_opcode_size(opcode);
     if (stats_is_c02_opcode(opcode)) {
         c02_opcode_count++;
+    }
+}
+
+/* Call this after an instruction is complete to record its actual size */
+void stats_record_instruction_size(void) {
+    extern uint16_t pc;
+    if (instruction_start_pc != 0xFFFF) {
+        int size = pc - instruction_start_pc;
+        if (size > 0 && size <= 3) {  /* Sanity check: instructions are 1-3 bytes */
+            total_opcode_bytes += size;
+        }
+        instruction_start_pc = 0xFFFF;  /* Reset for next instruction */
     }
 }
 
@@ -570,6 +588,9 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                 r->instr_addr = jmp_addr;
                 r->target_addr = operand;
                 
+                /* Calculate offset from byte after BRA instruction */
+                int16_t bra_offset = (int16_t)(operand - (jmp_addr + 2));
+                
                 /* Use the stored expression if it's a label, otherwise show offset */
                 if (instr_history_count > 0) {
                     instr_history_t *jmp_hist = &instr_history[instr_history_count - 1];
@@ -580,36 +601,181 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                                        (first_char >= 'a' && first_char <= 'z') || 
                                        first_char == '_');
                         if (is_label) {
-                            /* It's a label, use it */
+                            /* It's a label - prefer BRA *-LABEL format, fallback to numeric offset */
                             snprintf(r->old_code, sizeof(r->old_code), "JMP %s", jmp_hist->expression);
-                            snprintf(r->new_code, sizeof(r->new_code), "BRA %s", jmp_hist->expression);
+                            snprintf(r->new_code, sizeof(r->new_code), "BRA *-%s", jmp_hist->expression);
                         } else {
                             /* It's a numeric expression, show offset */
                             snprintf(r->old_code, sizeof(r->old_code), "JMP %s", jmp_hist->expression);
-                            if (offset >= 0) {
-                                snprintf(r->new_code, sizeof(r->new_code), "BRA *+%d", offset);
-                            } else {
-                                snprintf(r->new_code, sizeof(r->new_code), "BRA *%d", offset);
-                            }
+                            snprintf(r->new_code, sizeof(r->new_code), "BRA %+d", bra_offset);
                         }
                     } else {
                         snprintf(r->old_code, sizeof(r->old_code), "JMP $%04X", operand);
-                        if (offset >= 0) {
-                            snprintf(r->new_code, sizeof(r->new_code), "BRA *+%d", offset);
-                        } else {
-                            snprintf(r->new_code, sizeof(r->new_code), "BRA *%d", offset);
-                        }
+                        snprintf(r->new_code, sizeof(r->new_code), "BRA %+d", bra_offset);
                     }
                 } else {
                     snprintf(r->old_code, sizeof(r->old_code), "JMP $%04X", operand);
-                    if (offset >= 0) {
-                        snprintf(r->new_code, sizeof(r->new_code), "BRA *+%d", offset);
-                    } else {
-                        snprintf(r->new_code, sizeof(r->new_code), "BRA *%d", offset);
-                    }
+                    snprintf(r->new_code, sizeof(r->new_code), "BRA %+d", bra_offset);
                 }
                 r->bytes_saved = 1; /* JMP abs (3 bytes), BRA rel (2 bytes), saves 1 */
                 replacement_count++;
+            }
+        }
+    }
+    
+    /* Check for JMP (abs,X) replacement patterns when RTS is encountered */
+    if (opcode == 0x60) {  /* RTS */
+        /* Pattern 1: ASL -> TAX -> LDA TABLE+1,X -> PHA -> LDA TABLE,X -> PHA -> RTS */
+        if (instr_history_count >= 7) {
+            instr_history_t *asl = &instr_history[instr_history_count - 7];
+            instr_history_t *tax = &instr_history[instr_history_count - 6];
+            instr_history_t *lda_high = &instr_history[instr_history_count - 5];
+            instr_history_t *pha1 = &instr_history[instr_history_count - 4];
+            instr_history_t *lda_low = &instr_history[instr_history_count - 3];
+            instr_history_t *pha2 = &instr_history[instr_history_count - 2];
+            instr_history_t *rts = &instr_history[instr_history_count - 1];
+            
+            /* Check if pattern matches: ASL (0x0A), TAX (0xAA), LDA abs,X (0xBD) or zp,X (0xB5), PHA (0x48), LDA abs,X (0xBD) or zp,X (0xB5), PHA (0x48), RTS (0x60) */
+            if ((asl->opcode == 0x0A || asl->opcode == 0x06 || asl->opcode == 0x0E || 
+                 asl->opcode == 0x16 || asl->opcode == 0x1E) &&  /* ASL variants */
+                tax->opcode == 0xAA &&  /* TAX */
+                (lda_high->opcode == 0xBD || lda_high->opcode == 0xB5) &&  /* LDA abs,X or zp,X */
+                pha1->opcode == 0x48 &&  /* PHA */
+                (lda_low->opcode == 0xBD || lda_low->opcode == 0xB5) &&  /* LDA abs,X or zp,X */
+                pha2->opcode == 0x48 &&  /* PHA */
+                rts->opcode == 0x60) {  /* RTS */
+                
+                /* Check if the two LDA operands differ by 1 (TABLE+1 and TABLE) */
+                /* Also check expressions if available */
+                int operand_match = (lda_high->operand == lda_low->operand + 1);
+                int expr_match = 0;
+                if (lda_high->expression[0] != '\0' && lda_low->expression[0] != '\0') {
+                    /* Check if high expression contains "+1" and low expression is the base */
+                    if (strstr(lda_high->expression, "+1") != NULL || 
+                        strstr(lda_high->expression, "+ 1") != NULL) {
+                        /* Extract base name from high expression */
+                        char base_name[64];
+                        strncpy(base_name, lda_high->expression, sizeof(base_name) - 1);
+                        base_name[sizeof(base_name) - 1] = '\0';
+                        char *plus_pos = strstr(base_name, "+1");
+                        if (!plus_pos) plus_pos = strstr(base_name, "+ 1");
+                        if (plus_pos) *plus_pos = '\0';
+                        /* Trim whitespace */
+                        while (strlen(base_name) > 0 && base_name[strlen(base_name) - 1] == ' ') {
+                            base_name[strlen(base_name) - 1] = '\0';
+                        }
+                        if (strcmp(base_name, lda_low->expression) == 0) {
+                            expr_match = 1;
+                        }
+                    }
+                }
+                if (operand_match || expr_match) {
+                    if (replacement_count < MAX_REPLACEMENTS) {
+                        replacement_t *r = &replacements[replacement_count];
+                        strcpy(r->type, "JMP (abs,X)");
+                        r->line_num = asl->line_num;
+                        strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                        r->filename[sizeof(r->filename) - 1] = '\0';
+                        
+                        /* Build old code string */
+                        const char *asl_name = asl->instr_name;
+                        if (lda_low->expression[0] != '\0') {
+                            /* Try to extract table name from expression */
+                            char table_name[64];
+                            strncpy(table_name, lda_low->expression, sizeof(table_name) - 1);
+                            table_name[sizeof(table_name) - 1] = '\0';
+                            snprintf(r->old_code, sizeof(r->old_code), "%s; TAX; LDA %s+1,X; PHA; LDA %s,X; PHA; RTS",
+                                    asl_name, table_name, table_name);
+                            snprintf(r->new_code, sizeof(r->new_code), "%s; TAX; JMP (%s,X)", asl_name, table_name);
+                        } else {
+                            snprintf(r->old_code, sizeof(r->old_code), "%s; TAX; LDA $%04X,X; PHA; LDA $%04X,X; PHA; RTS",
+                                    asl_name, lda_high->operand, lda_low->operand);
+                            snprintf(r->new_code, sizeof(r->new_code), "%s; TAX; JMP ($%04X,X)", asl_name, lda_low->operand);
+                        }
+                        /* ASL (1) + TAX (1) + LDA abs,X (3) + PHA (1) + LDA abs,X (3) + PHA (1) + RTS (1) = 11 bytes
+                         * ASL (1) + TAX (1) + JMP (abs,X) (3) = 5 bytes, saves 6 */
+                        r->bytes_saved = 6;
+                        replacement_count++;
+                    }
+                }
+            }
+        }
+        
+        /* Pattern 2: LDA TABLEH,X -> PHA -> LDA TABLEL,X -> PHA -> RTS */
+        if (instr_history_count >= 5) {
+            instr_history_t *lda_high = &instr_history[instr_history_count - 5];
+            instr_history_t *pha1 = &instr_history[instr_history_count - 4];
+            instr_history_t *lda_low = &instr_history[instr_history_count - 3];
+            instr_history_t *pha2 = &instr_history[instr_history_count - 2];
+            instr_history_t *rts = &instr_history[instr_history_count - 1];
+            
+            /* Check if pattern matches: LDA abs,X (0xBD) or zp,X (0xB5), PHA (0x48), LDA abs,X (0xBD) or zp,X (0xB5), PHA (0x48), RTS (0x60) */
+            if ((lda_high->opcode == 0xBD || lda_high->opcode == 0xB5) &&  /* LDA abs,X or zp,X */
+                pha1->opcode == 0x48 &&  /* PHA */
+                (lda_low->opcode == 0xBD || lda_low->opcode == 0xB5) &&  /* LDA abs,X or zp,X */
+                pha2->opcode == 0x48 &&  /* PHA */
+                rts->opcode == 0x60) {  /* RTS */
+                
+                /* Check if expressions suggest TABLEH and TABLEL pattern */
+                /* We'll check if the expressions end with 'H' and 'L' or contain 'H'/'L' */
+                int is_tableh_tabl = 0;
+                if (lda_high->expression[0] != '\0' && lda_low->expression[0] != '\0') {
+                    /* Check if expressions suggest high/low table pattern */
+                    char *high_expr = lda_high->expression;
+                    char *low_expr = lda_low->expression;
+                    size_t high_len = strlen(high_expr);
+                    size_t low_len = strlen(low_expr);
+                    
+                    /* Check if one ends with 'H' and the other with 'L' */
+                    if (high_len > 0 && low_len > 0) {
+                        if ((high_expr[high_len - 1] == 'H' || high_expr[high_len - 1] == 'h') &&
+                            (low_expr[low_len - 1] == 'L' || low_expr[low_len - 1] == 'l')) {
+                            /* Check if base names match (without H/L suffix) */
+                            if (high_len == low_len && 
+                                strncmp(high_expr, low_expr, high_len - 1) == 0) {
+                                is_tableh_tabl = 1;
+                            }
+                        }
+                    }
+                }
+                
+                /* Also check if operands are close (within reasonable range for separate tables) */
+                /* For pattern 2, the tables are separate, so we don't require operand relationship */
+                if (is_tableh_tabl || (lda_high->operand != lda_low->operand && 
+                                      lda_high->operand != lda_low->operand + 1)) {
+                    if (replacement_count < MAX_REPLACEMENTS) {
+                        replacement_t *r = &replacements[replacement_count];
+                        strcpy(r->type, "JMP (abs,X)");
+                        r->line_num = lda_high->line_num;
+                        strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                        r->filename[sizeof(r->filename) - 1] = '\0';
+                        
+                        if (is_tableh_tabl && lda_high->expression[0] != '\0') {
+                            /* Extract base table name (remove 'H' suffix) */
+                            char table_name[64];
+                            size_t len = strlen(lda_high->expression);
+                            if (len > 0 && len < sizeof(table_name)) {
+                                strncpy(table_name, lda_high->expression, len - 1);
+                                table_name[len - 1] = '\0';
+                                snprintf(r->old_code, sizeof(r->old_code), "LDA %s,X; PHA; LDA %s,X; PHA; RTS",
+                                        lda_high->expression, lda_low->expression);
+                                snprintf(r->new_code, sizeof(r->new_code), "JMP (%s,X)", table_name);
+                            } else {
+                                snprintf(r->old_code, sizeof(r->old_code), "LDA %s,X; PHA; LDA %s,X; PHA; RTS",
+                                        lda_high->expression, lda_low->expression);
+                                snprintf(r->new_code, sizeof(r->new_code), "JMP ($%04X,X)", lda_low->operand);
+                            }
+                        } else {
+                            snprintf(r->old_code, sizeof(r->old_code), "LDA $%04X,X; PHA; LDA $%04X,X; PHA; RTS",
+                                    lda_high->operand, lda_low->operand);
+                            snprintf(r->new_code, sizeof(r->new_code), "JMP ($%04X,X)", lda_low->operand);
+                        }
+                        /* LDA abs,X (3) + PHA (1) + LDA abs,X (3) + PHA (1) + RTS (1) = 9 bytes
+                         * JMP (abs,X) (3) = 3 bytes, saves 6 */
+                        r->bytes_saved = 6;
+                        replacement_count++;
+                    }
+                }
             }
         }
     }
@@ -789,7 +955,7 @@ void stats_print_report(void) {
         
         /* Group by type */
         int stz_count = 0, phx_count = 0, phy_count = 0, plx_count = 0, ply_count = 0, bra_count = 0;
-        int inc_count = 0, dec_count = 0, tsb_count = 0, trb_count = 0;
+        int inc_count = 0, dec_count = 0, tsb_count = 0, trb_count = 0, jmp_indx_count = 0;
         
         for (int i = 0; i < replacement_count; i++) {
             replacement_t *r = &replacements[i];
@@ -803,6 +969,7 @@ void stats_print_report(void) {
             else if (strcmp(r->type, "DEC") == 0) dec_count++;
             else if (strcmp(r->type, "TSB") == 0) tsb_count++;
             else if (strcmp(r->type, "TRB") == 0) trb_count++;
+            else if (strcmp(r->type, "JMP (abs,X)") == 0) jmp_indx_count++;
         }
         
         if (stz_count > 0) printf("  STZ replacements: %d\n", stz_count);
@@ -815,6 +982,7 @@ void stats_print_report(void) {
         if (dec_count > 0) printf("  DEC replacements: %d\n", dec_count);
         if (tsb_count > 0) printf("  TSB replacements: %d\n", tsb_count);
         if (trb_count > 0) printf("  TRB replacements: %d\n", trb_count);
+        if (jmp_indx_count > 0) printf("  JMP (abs,X) replacements: %d\n", jmp_indx_count);
         
         printf("\nDetailed replacements:\n");
         for (int i = 0; i < replacement_count; i++) {
@@ -1031,7 +1199,7 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             
             /* Group by type */
             int stz_count = 0, phx_count = 0, phy_count = 0, plx_count = 0, ply_count = 0, bra_count = 0;
-            int ina_count = 0, dea_count = 0, tsb_count = 0, trb_count = 0;
+            int ina_count = 0, dea_count = 0, tsb_count = 0, trb_count = 0, jmp_indx_count = 0;
             
             for (int i = 0; i < replacement_count; i++) {
                 replacement_t *r = &replacements[i];
@@ -1045,6 +1213,7 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
                 else if (strcmp(r->type, "DEA") == 0) dea_count++;
                 else if (strcmp(r->type, "TSB") == 0) tsb_count++;
                 else if (strcmp(r->type, "TRB") == 0) trb_count++;
+                else if (strcmp(r->type, "JMP (abs,X)") == 0) jmp_indx_count++;
             }
             
             if (stz_count > 0) printf("  STZ replacements: %d\n", stz_count);
@@ -1057,6 +1226,7 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             if (dea_count > 0) printf("  DEA replacements: %d\n", dea_count);
             if (tsb_count > 0) printf("  TSB replacements: %d\n", tsb_count);
             if (trb_count > 0) printf("  TRB replacements: %d\n", trb_count);
+            if (jmp_indx_count > 0) printf("  JMP (abs,X) replacements: %d\n", jmp_indx_count);
             
             printf("========================================\n");
         }
@@ -1068,7 +1238,7 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
                 total_bytes_saved += optimizations[i].bytes_saved;
             }
             
-            printf("\n=== Code Optimizations ===\n");
+            printf("\n=== Code Optimization ===\n");
             printf("Total possible optimizations: %d\n", optimization_count);
             printf("Total bytes saved: %d", total_bytes_saved);
             if (total_opcode_bytes > 0) {
@@ -1165,4 +1335,3 @@ void stats_record_zero_to_memory(const char *instruction, uint16_t address) {
     zt->is_register = 0;
     zero_transfer_count++;
 }
-
