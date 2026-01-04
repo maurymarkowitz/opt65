@@ -50,6 +50,9 @@ int current_macro_body_len = 0;
 int if_stack[MAX_IF_DEPTH];
 int if_stack_depth = 0;
 
+/* Pending identifier for multi-label support (e.g., DEGFLG on one line, RADFLG: .RES 1 on next) */
+static char *pending_identifier = NULL;
+
 /* Forward declaration */
 int is_conditional_active(void);
 
@@ -116,23 +119,38 @@ program:
     ;
 
 line:
-    NEWLINE
-    | label NEWLINE
-    | instruction NEWLINE
-    | directive NEWLINE
-    | label instruction NEWLINE
-    | label directive NEWLINE
-    | assignment NEWLINE
-    | label assignment NEWLINE
-    | org_equals NEWLINE
-    | label org_equals NEWLINE
+    NEWLINE { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | label NEWLINE { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | instruction NEWLINE { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | directive NEWLINE { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | label instruction NEWLINE { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | label directive NEWLINE {
+        /* If there was a pending identifier from previous line, define it with same value as the label */
+        if (pending_identifier && is_conditional_active()) {
+            add_symbol(pending_identifier, pc);
+            free(pending_identifier);
+            pending_identifier = NULL;
+        }
+    }
+    | assignment NEWLINE { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | label assignment NEWLINE { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | org_equals NEWLINE { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | label org_equals NEWLINE { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | IDENTIFIER NEWLINE {
+        /* Store identifier for potential multi-label definition (e.g., DEGFLG on one line, RADFLG: .RES 1 on next) */
+        if (pending_identifier) {
+            free(pending_identifier);
+        }
+        pending_identifier = strdup($1);
+    }
     | TITLE { /* Title directive - no-op, rest of line will be consumed by lexer */ }
     | LIST IDENTIFIER NEWLINE { /* List directive - no-op */ }
-    | macro_start
-    | macro_invocation
-    | if_block
-    | endif_directive
-    | END { 
+    | macro_start { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | macro_invocation { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | if_block { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | endif_directive { if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } }
+    | END {
+        if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; } 
         extern void stats_record_instruction_size(void);
         stats_record_instruction_size();  /* Record size of last instruction */
         if (pass == 2) {
@@ -140,7 +158,8 @@ line:
         }
         /* In pass 1, continue to build complete symbol table */
     }
-    | END NEWLINE { 
+    | END NEWLINE {
+        if (pending_identifier) { free(pending_identifier); pending_identifier = NULL; }
         extern void stats_record_instruction_size(void);
         stats_record_instruction_size();  /* Record size of last instruction */
         if (pass == 2) {
@@ -176,6 +195,12 @@ label:
     {
         if (is_conditional_active()) {
             add_symbol($1, pc);
+            /* If there was a pending identifier, also define it with same value */
+            if (pending_identifier) {
+                add_symbol(pending_identifier, pc);
+                free(pending_identifier);
+                pending_identifier = NULL;
+            }
         }
     }
     ;
@@ -518,6 +543,8 @@ address_instruction:
             uint16_t addr = eval_expr($2);
             emit_opcode(0x20);
             emit_word(addr);
+            extern char *yyfilename;
+            stats_record_instruction(0x20, "JSR", addr, yylineno, yyfilename, $2);
         } else {
             emit_opcode(0x20);
             emit_word(0);

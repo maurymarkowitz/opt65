@@ -18,6 +18,8 @@ static int sta_zero_count = 0;
 static int c02_opcode_count = 0;
 static char *current_filename = NULL;
 static int binary_size = 0;
+static int total_jmp_count = 0;  /* Total number of JMP instructions */
+static int total_jsr_count = 0;  /* Total number of JSR instructions */
 
 /* Instruction history for pattern detection */
 typedef struct {
@@ -128,6 +130,8 @@ void stats_init(void) {
     instr_history_count = 0;
     replacement_count = 0;
     optimization_count = 0;
+    total_jmp_count = 0;
+    total_jsr_count = 0;
     /* Note: current_filename and binary_size are not reset - they're set externally */
 }
 
@@ -265,6 +269,13 @@ void stats_record_sta_zero(void) {
 }
 
 void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t operand, int line_num, const char *filename, const char *expression) {
+    /* Count JMP and JSR instructions */
+    if (opcode == 0x4C) {  /* JMP absolute */
+        total_jmp_count++;
+    } else if (opcode == 0x20) {  /* JSR absolute */
+        total_jsr_count++;
+    }
+    
     /* Add to history */
     if (instr_history_count >= MAX_INSTR_HISTORY) {
         /* Shift history */
@@ -623,6 +634,58 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
         }
     }
     
+    /* Check for JSR that could be BRS (hypothetical opcode - does not exist) */
+    if (opcode == 0x20) {  /* JSR absolute */
+        extern uint16_t pc;
+        /* Calculate offset from byte after BRS instruction
+         * JSR is at pc-3, BRS would be at pc-3, offset calculated from pc-1 */
+        uint16_t jsr_addr = pc - 3;  /* Address of the JSR instruction */
+        int16_t offset = (int16_t)(operand - (pc - 1));
+        if (offset >= -128 && offset <= 127) {
+            if (replacement_count < MAX_REPLACEMENTS) {
+                replacement_t *r = &replacements[replacement_count];
+                strcpy(r->type, "BRS");
+                r->line_num = line_num;
+                strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                r->filename[sizeof(r->filename) - 1] = '\0';
+                r->instr_addr = jsr_addr;
+                r->target_addr = operand;
+                
+                /* Calculate offset from byte after BRS instruction */
+                int16_t brs_offset = (int16_t)(operand - (jsr_addr + 2));
+                
+                /* Use the stored expression if it's a label, otherwise show offset */
+                if (instr_history_count > 0) {
+                    instr_history_t *jsr_hist = &instr_history[instr_history_count - 1];
+                    if (jsr_hist->expression[0] != '\0') {
+                        /* Check if expression looks like a label (starts with letter) vs numeric (starts with $ or digit) */
+                        char first_char = jsr_hist->expression[0];
+                        int is_label = ((first_char >= 'A' && first_char <= 'Z') || 
+                                       (first_char >= 'a' && first_char <= 'z') || 
+                                       first_char == '_');
+                        if (is_label) {
+                            /* It's a label - prefer BRS *-LABEL format, fallback to numeric offset */
+                            snprintf(r->old_code, sizeof(r->old_code), "JSR %s", jsr_hist->expression);
+                            snprintf(r->new_code, sizeof(r->new_code), "BRS *-%s", jsr_hist->expression);
+                        } else {
+                            /* It's a numeric expression, show offset */
+                            snprintf(r->old_code, sizeof(r->old_code), "JSR %s", jsr_hist->expression);
+                            snprintf(r->new_code, sizeof(r->new_code), "BRS %+d", brs_offset);
+                        }
+                    } else {
+                        snprintf(r->old_code, sizeof(r->old_code), "JSR $%04X", operand);
+                        snprintf(r->new_code, sizeof(r->new_code), "BRS %+d", brs_offset);
+                    }
+                } else {
+                    snprintf(r->old_code, sizeof(r->old_code), "JSR $%04X", operand);
+                    snprintf(r->new_code, sizeof(r->new_code), "BRS %+d", brs_offset);
+                }
+                r->bytes_saved = 1; /* JSR abs (3 bytes), BRS rel (2 bytes), saves 1 */
+                replacement_count++;
+            }
+        }
+    }
+    
     /* Check for JMP (abs,X) replacement patterns when RTS is encountered */
     if (opcode == 0x60) {  /* RTS */
         /* Pattern 1: ASL -> TAX -> LDA TABLE+1,X -> PHA -> LDA TABLE,X -> PHA -> RTS */
@@ -791,12 +854,12 @@ void stats_print_report(void) {
     printf("\n=== Binary Statistics ===\n");
     printf("Total bytes in binary: %d\n", binary_size);
     if (min_address != 0xFFFF && max_address != 0) {
-        printf("Lowest emitted address (includes data bytes): $%04X\n", min_address);
-        printf("Highest emitted address (includes data bytes): $%04X\n", max_address);
+        printf("Lowest emitted address: $%04X\n", min_address);
+        printf("Highest emitted address: $%04X\n", max_address);
     } else if (binary_size > 0) {
         /* Fallback to org_address if min/max not set */
-        printf("Lowest emitted address (includes data bytes): $%04X\n", org_address);
-        printf("Highest emitted address (includes data bytes): $%04X\n", org_address + binary_size - 1);
+        printf("Lowest emitted address: $%04X\n", org_address);
+        printf("Highest emitted address): $%04X\n", org_address + binary_size - 1);
     }
     if (min_opcode_address != 0xFFFF && max_opcode_address != 0) {
         printf("Lowest opcode address: $%04X\n", min_opcode_address);
@@ -805,7 +868,8 @@ void stats_print_report(void) {
     printf("========================\n");
     
     printf("\n=== Opcode Statistics ===\n");
-    printf("Total opcodes emitted: %d\n\n", total_opcodes);
+    printf("Total opcodes emitted: %d\n", total_opcodes);
+    printf("Total opcodes bytes emitted: %d\n\n", total_opcode_bytes);
     
     /* Collect opcodes with counts > 0 and sort by mnemonic */
     typedef struct {
@@ -885,7 +949,22 @@ void stats_print_report(void) {
             if (sta_zero_count > 0) {
                 printf(" (plus %d STA $00)", sta_zero_count);
             }
-            printf("\n\n");
+            printf("\n");
+            
+            /* Calculate potential savings if LDA #0, LDX #0, LDY #0 were single-byte */
+            int lda_zero_count = immediate_zero_counts[0xA9];  /* LDA #0 */
+            int ldx_zero_count = immediate_zero_counts[0xA2];  /* LDX #0 */
+            int ldy_zero_count = immediate_zero_counts[0xA0];  /* LDY #0 */
+            int total_single_byte_savings = lda_zero_count + ldx_zero_count + ldy_zero_count;
+            if (total_single_byte_savings > 0) {
+                printf("Potential savings of LZA/LZX/LZY: %d bytes", total_single_byte_savings);
+                if (total_opcode_bytes > 0) {
+                    double percent = (double)total_single_byte_savings * 100.0 / (double)total_opcode_bytes;
+                    printf(" (%.1f%% of total opcode bytes)", percent);
+                }
+                printf("\n");
+            }
+            printf("\n");
             
             /* Collect immediate zero opcodes with counts > 0 and sort by mnemonic */
             opcode_entry_t zero_entries[256];
@@ -951,11 +1030,11 @@ void stats_print_report(void) {
             double percent = (double)total_bytes_saved * 100.0 / (double)total_opcode_bytes;
             printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
         }
-        printf("\n\n");
+        printf("\n");
         
         /* Group by type */
         int stz_count = 0, phx_count = 0, phy_count = 0, plx_count = 0, ply_count = 0, bra_count = 0;
-        int inc_count = 0, dec_count = 0, tsb_count = 0, trb_count = 0, jmp_indx_count = 0;
+        int inc_count = 0, dec_count = 0, tsb_count = 0, trb_count = 0, jmp_indx_count = 0, brs_count = 0;
         
         for (int i = 0; i < replacement_count; i++) {
             replacement_t *r = &replacements[i];
@@ -970,14 +1049,16 @@ void stats_print_report(void) {
             else if (strcmp(r->type, "TSB") == 0) tsb_count++;
             else if (strcmp(r->type, "TRB") == 0) trb_count++;
             else if (strcmp(r->type, "JMP (abs,X)") == 0) jmp_indx_count++;
+            else if (strcmp(r->type, "BRS") == 0) brs_count++;
         }
         
+        if (bra_count > 0) printf("  BRA replacements: %d (from %d JMP instructions)\n", bra_count, total_jmp_count);
+        if (brs_count > 0) printf("  BRS replacements: %d (from %d JSR instructions) (NOTE: BRS opcode does not exist)\n", brs_count, total_jsr_count);
         if (stz_count > 0) printf("  STZ replacements: %d\n", stz_count);
         if (phx_count > 0) printf("  PHX replacements: %d\n", phx_count);
         if (phy_count > 0) printf("  PHY replacements: %d\n", phy_count);
         if (plx_count > 0) printf("  PLX replacements: %d\n", plx_count);
         if (ply_count > 0) printf("  PLY replacements: %d\n", ply_count);
-        if (bra_count > 0) printf("  BRA replacements: %d\n", bra_count);
         if (inc_count > 0) printf("  INC replacements: %d\n", inc_count);
         if (dec_count > 0) printf("  DEC replacements: %d\n", dec_count);
         if (tsb_count > 0) printf("  TSB replacements: %d\n", tsb_count);
@@ -987,6 +1068,8 @@ void stats_print_report(void) {
         printf("\nDetailed replacements:\n");
         for (int i = 0; i < replacement_count; i++) {
             replacement_t *r = &replacements[i];
+            /* Skip BRS replacements in detailed section */
+            if (strcmp(r->type, "BRS") == 0) continue;
             printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
             if (strcmp(r->type, "BRA") == 0) {
                 int16_t offset = (int16_t)(r->target_addr - (r->instr_addr + 2));
@@ -1027,7 +1110,8 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
         
         /* Print opcode statistics */
         printf("\n=== Opcode Statistics ===\n");
-        printf("Total opcodes emitted: %d\n\n", total_opcodes);
+        printf("Total opcodes emitted: %d\n", total_opcodes);
+    printf("Total opcodes bytes emitted: %d\n", total_opcode_bytes);
         
         /* Collect opcodes with counts > 0 and sort by mnemonic */
         typedef struct {
@@ -1129,7 +1213,22 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             if (sta_zero_count > 0) {
                 printf(" (plus %d STA $00)", sta_zero_count);
             }
-            printf("\n\n");
+            printf("\n");
+            
+            /* Calculate potential savings if LDA #0, LDX #0, LDY #0 were single-byte */
+            int lda_zero_count = immediate_zero_counts[0xA9];  /* LDA #0 */
+            int ldx_zero_count = immediate_zero_counts[0xA2];  /* LDX #0 */
+            int ldy_zero_count = immediate_zero_counts[0xA0];  /* LDY #0 */
+            int total_single_byte_savings = lda_zero_count + ldx_zero_count + ldy_zero_count;
+            if (total_single_byte_savings > 0) {
+                printf("Potential savings (LDA/LDX/LDY #0 -> single-byte): %d bytes", total_single_byte_savings);
+                if (total_opcode_bytes > 0) {
+                    double percent = (double)total_single_byte_savings * 100.0 / (double)total_opcode_bytes;
+                    printf(" (%.1f%% of total opcode bytes)", percent);
+                }
+                printf("\n");
+            }
+            printf("\n");
             
             /* Collect immediate zero opcodes with counts > 0 and sort by mnemonic */
             opcode_entry_t zero_entries[256];
@@ -1199,7 +1298,7 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             
             /* Group by type */
             int stz_count = 0, phx_count = 0, phy_count = 0, plx_count = 0, ply_count = 0, bra_count = 0;
-            int ina_count = 0, dea_count = 0, tsb_count = 0, trb_count = 0, jmp_indx_count = 0;
+            int ina_count = 0, dea_count = 0, tsb_count = 0, trb_count = 0, jmp_indx_count = 0, brs_count = 0;
             
             for (int i = 0; i < replacement_count; i++) {
                 replacement_t *r = &replacements[i];
@@ -1214,14 +1313,18 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
                 else if (strcmp(r->type, "TSB") == 0) tsb_count++;
                 else if (strcmp(r->type, "TRB") == 0) trb_count++;
                 else if (strcmp(r->type, "JMP (abs,X)") == 0) jmp_indx_count++;
+                else if (strcmp(r->type, "BRS") == 0) brs_count++;
             }
+            
+            if (bra_count > 0) printf("  BRA replacements: %d (from %d JMP instructions)\n", bra_count, total_jmp_count);
+            if (brs_count > 0) printf("  BRS replacements: %d (from %d JSR instructions) (NOTE: BRS opcode does not exist)\n", brs_count, total_jsr_count);
+            printf("\n");
             
             if (stz_count > 0) printf("  STZ replacements: %d\n", stz_count);
             if (phx_count > 0) printf("  PHX replacements: %d\n", phx_count);
             if (phy_count > 0) printf("  PHY replacements: %d\n", phy_count);
             if (plx_count > 0) printf("  PLX replacements: %d\n", plx_count);
             if (ply_count > 0) printf("  PLY replacements: %d\n", ply_count);
-            if (bra_count > 0) printf("  BRA replacements: %d\n", bra_count);
             if (ina_count > 0) printf("  INA replacements: %d\n", ina_count);
             if (dea_count > 0) printf("  DEA replacements: %d\n", dea_count);
             if (tsb_count > 0) printf("  TSB replacements: %d\n", tsb_count);
@@ -1268,6 +1371,8 @@ void stats_print_report_custom(int print_stats, int show_suggestions) {
             printf("\n=== 65C02 Replacement Suggestions ===\n");
             for (int i = 0; i < replacement_count; i++) {
                 replacement_t *r = &replacements[i];
+                /* Skip BRS replacements in detailed section */
+                if (strcmp(r->type, "BRS") == 0) continue;
                 printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
                 if (strcmp(r->type, "BRA") == 0) {
                     int16_t offset = (int16_t)(r->target_addr - (r->instr_addr + 2));
