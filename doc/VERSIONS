@@ -1,0 +1,6 @@
+opt65 version history
+
+Version 1.0 - initial release, 2026
+
+- basic functionality to parse 6502 code and produce binary and statistics
+- command line switches WILL change in future versions!

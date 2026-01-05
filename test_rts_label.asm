@@ -1,4 +1,0 @@
-    .ORG $8000
-RETURN: JSR SENDDS
-    LDA #0
-    RTS RETURN

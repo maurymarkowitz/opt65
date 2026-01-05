@@ -1,4 +1,0 @@
-    .ORG $8000
-BRKKY2 = $1234
-    LDA #.LOW.BRKKY2
-    LDA #.HIGH.BRKKY2

@@ -1,97 +1,56 @@
-# 6502 Assembler
+opt65
+=====
 
-A 6502 assembler written in Flex and Bison.
+**Copyright © 2026 Maury Markowitz**
+
+[![GPL license](http://img.shields.io/badge/license-GPL-brightgreen.svg)](https://opensource.org/licenses/gpl-license)
+
+## Introduction
+
+opt65 is a 6502 parser that collects statistics about the source code and uses them to suggest changes to improve it. This includes tests for redundant code, JMPs that can be branches, and similar optimizations.
+
+It also looks for examples of code that can be replaced by new instructions in the 65c02, and can optionally print a detailed list of the individual replacements.
+
+Future expansions will expand the suggestions to include 65ce02 opcodes, and a pretty-printer. Command line switches are subject to change!
+
+opt65 currently understands several early assembler dialects, but the main target was the Microtek cross-assembler running on the PDP-11.
 
 ## Building
 
-Make sure you have `flex`, `bison`, and `gcc` installed:
+Make sure you have `flex`, `bison`, and `gcc` or `clang` installed:
 
-```bash
-make
-```
+`make`
 
-This will create the `asm65` executable.
+This will create the `opt65` executable.
 
 ## Usage
 
-```bash
-./asm65 input.asm [output.bin]
+```
+./opt65 [OPTIONS] <input.asm> [output.bin]
+```
+
+### Options
+
+- `-h, --help` - Print help message
+- `-v, --version` - Print version information
+- `-o <file>` - Specify output file name
+- `-n, --no-code` - Don't save the binary output file
+- `-s, --suggestions` - Print individual 65C02 replacement suggestions
+
+### Examples
+
+```
+# Basic usage - creates input.bin
+./opt65 input.asm
+
+# Show detailed optimization suggestions
+./opt65 -s input.asm
+
+# Show statistics only (no suggestions)
+./opt65 -p input.asm
+
+# Assemble without saving binary
+./opt65 -n -s input.asm
 ```
 
 If no output file is specified, it will create a `.bin` file with the same name as the input file.
-
-## Features
-
-### Instructions
-
-All standard 6502 instructions are supported:
-- Arithmetic: ADC, SBC
-- Logical: AND, ORA, EOR
-- Shifts: ASL, LSR, ROL, ROR
-- Comparisons: CMP, CPX, CPY, BIT
-- Load/Store: LDA, LDX, LDY, STA, STX, STY
-- Branches: BCC, BCS, BEQ, BMI, BNE, BPL, BVC, BVS
-- Jumps: JMP, JSR
-- Stack: PHA, PHP, PLA, PLP
-- Registers: TAX, TAY, TSX, TXA, TXS, TYA
-- Increment/Decrement: INC, INX, INY, DEC, DEX, DEY
-- Flags: CLC, CLD, CLI, CLV, SEC, SED, SEI
-- Other: BRK, NOP, RTI, RTS
-
-### Addressing Modes
-
-- Implied (e.g., `NOP`, `RTS`)
-- Accumulator (e.g., `ASL`)
-- Immediate (e.g., `LDA #$42`)
-- Absolute (e.g., `LDA $1000`)
-- Zero Page (e.g., `LDA $42`)
-- Indexed (e.g., `LDA $1000,X`, `LDA $1000,Y`)
-- Zero Page Indexed (e.g., `LDA $42,X`)
-- Indirect (e.g., `JMP ($1000)`)
-- Indirect Indexed (e.g., `LDA ($42,X)`, `LDA ($42),Y`)
-- Relative (e.g., `BEQ label`)
-
-### Directives
-
-- `.ORG address` - Set the origin address
-- `.BYTE value` - Emit a byte
-- `.WORD value` - Emit a word (little-endian)
-- `.RES count` - Reserve bytes
-
-### Labels
-
-Labels are defined with a colon:
-```
-start:
-    LDA #$00
-    STA $2000
-    JMP start
-```
-
-## Example
-
-Create a file `test.asm`:
-
-```asm
-    .ORG $8000
-
-start:
-    LDA #$42
-    STA $2000
-    JMP start
-```
-
-Assemble it:
-```bash
-./asm65 test.asm
-```
-
-This will create `test.bin` with the assembled code.
-
-## Notes
-
-- Numbers can be decimal (e.g., `42`) or hexadecimal (e.g., `$2A`)
-- Labels are case-insensitive
-- Comments start with `;` and continue to the end of the line
-- The assembler performs a single pass, so forward references may not work correctly for all cases
-

@@ -1,0 +1,18 @@
+# Generated files from flex
+lex.yy.c
+lex.yy.o
+
+# Generated files from bison
+parser.tab.c
+parser.tab.h
+parser.tab.o
+
+# Object files
+*.o
+
+# Binary output
+*.bin
+
+# Test output files
+test_*.bin
+

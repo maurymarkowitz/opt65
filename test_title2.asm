@@ -1,2 +1,0 @@
-    .TITLE  'CENTRAL INPUT/OUTPUT (CIO) 2-7-79'
-    ASCZER  =		 '0

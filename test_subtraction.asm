@@ -1,4 +1,0 @@
-    .ORG $8000
-    COMTAB = $1000
-    LDA COMTAB-3,Y
-    VALUE = 100-50

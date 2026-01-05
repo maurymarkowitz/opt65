@@ -1,3 +1,0 @@
-    .ORG $8000
-POKMSK: .RES	 1
-BRKKEY: .RES	 1

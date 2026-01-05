@@ -1,1 +1,0 @@
-PATSIZ   EQU     $1

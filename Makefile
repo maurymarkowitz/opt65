@@ -1,11 +1,14 @@
+SHELL = /bin/bash
+
 CC = gcc
-CFLAGS = -Wall -Wextra -std=c99
+CFLAGS = -Wall -Wextra -std=c99 -Isrc
 FLEX = flex
 BISON = bison
 
-TARGET = asm65
-SOURCES = main.c parser.tab.c lex.yy.c stats.c
-OBJECTS = $(SOURCES:.c=.o)
+TARGET = opt65
+SRCDIR = src
+SOURCES = $(SRCDIR)/main.c parser.tab.c lex.yy.c $(SRCDIR)/stats.c
+OBJECTS = $(SRCDIR)/main.o parser.tab.o lex.yy.o $(SRCDIR)/stats.o
 
 .PHONY: all clean
 
@@ -14,11 +17,11 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS)
 	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS) -ll || $(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS) -lfl
 
-parser.tab.c parser.tab.h: parser.y
-	$(BISON) -d parser.y
+parser.tab.c parser.tab.h: $(SRCDIR)/parser.y
+	$(BISON) -d $(SRCDIR)/parser.y
 
-lex.yy.c: lexer.l parser.tab.h
-	$(FLEX) lexer.l
+lex.yy.c: $(SRCDIR)/lexer.l parser.tab.h
+	$(FLEX) $(SRCDIR)/lexer.l
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
