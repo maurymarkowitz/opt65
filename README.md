@@ -33,17 +33,16 @@ This will create the `opt65` executable.
 
 - `-h, --help` - Print help message
 - `-v, --version` - Print version information
-- `-o <file>` - Specify output file name
 - `-n, --no-code` - Don't save the binary output file
 - `-s, --suggestions` - Print individual 65C02 replacement suggestions
 
 ### Examples
 
 ```
-# Basic usage - creates input.bin
+# Basic usage - creates input.bin and prints basic statistics
 ./opt65 input.asm
 
-# Show detailed optimization suggestions
+# Show detailed optimization suggestions for line-by-line replacements
 ./opt65 -s input.asm
 
 # Show statistics only (no suggestions)

@@ -9,7 +9,7 @@ Version 1.0.0
 
 ## Introduction
 
-opt65 is a 6502 assembler that is dedicated to collecting and displaying statistics about the assembler code. It is not really intended to be used as a production assembler, the conversion from assembler to binary is intended primarily as a way to ensure the parser is valid.
+opt65 is a 6502 assembler that is dedicated to collecting and displaying statistics about the assembler code. It is not intended to be used as a production assembler, the conversion from assembler to binary is intended primarily as a way to ensure the parser is valid.
 
 The program has several sections of output. Normally it will always produce:
 
