@@ -16,3 +16,9 @@ parser.tab.o
 # Test output files
 test_*.bin
 
+# Executable binary
+opt65
+
+# macOS files
+.DS_Store
+
