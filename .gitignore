@@ -22,3 +22,6 @@ opt65
 # macOS files
 .DS_Store
 
+# Atari operating system source file
+atari operating system source.asm.txt
+
