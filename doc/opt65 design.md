@@ -20,8 +20,8 @@ Running the 1.0 version on this code reveals some useful information. For instan
 * of the 100 JMP instructions, 33 are "short" and can be replaced by a BRA on the 65C02
 * of the 245 JSR's, 51 are short and could be replaced - but the 65C02 did not include this
 * there are a number of instructions with a #0 immediate that might be replaced by a new opcode, but...
-** 84 of those are loads to A, X or Y. This strongly suggests LZA/LZX/LZY opcodes would be very useful
-** and the other possibilities, like CAZ, are too rarely seen to be useful
+    * 84 of those are loads to A, X or Y. This strongly suggests LZA/LZX/LZY opcodes would be very useful
+    * and the other possibilities, like CAZ, are too rarely seen to be useful
 
 In all, when you look at possible basic optimizations of the original code, replacing some instructions with the new 65C02 versions, and imagining a version with BRS and LZA/LZX/LZY, the code would become about 5% shorter. Considering only those opcodes in the real 65C02, that is closer to 3%. Nothing to turn up your nose at, that's 300 bytes that can be put to good use, but certainly not the sort of numbers being claimed in the original articles.
 
