@@ -31,7 +31,7 @@ As the concept developed, conversations with like-minded retrocomputer enthusias
 
 * opt65 by Daniel Dallmann, https://hitmen.c02.at/files/cc65/opt65.c
 
-opt65 was suggested to me on the [retrocomputing forum](https://retrocomputingforum.com/t/6502-65c02-65ce02-assembly-updater/5113). It is a peephole optimizer that looks for a number of common programming issues. This inspired me to add similar tests to *my* opt65, a name I had selected before I learned of Daniel's code. Dan's code is more powerful than mine, it runs a data analysis to look, for exmaple, values that are loaded and then saved to the same location, which is beyond the scope of my code. There are also a number of simpler tests, like a TAX followed by a TXA that can be replaced by a TXA, or useless code like ORA #0, which have been added. These, unsurprisingly, are quite rare, but still worth looking for, and have been added to this program.
+opt65 was suggested to me on the [retrocomputing forum](https://retrocomputingforum.com/t/6502-65c02-65ce02-assembly-updater/5113). It is a peephole optimizer that looks for a number of common programming issues. This inspired me to add similar tests to *my* opt65, a name I had selected before I learned of Daniel's code. Dan's code is more powerful than mine, it runs a data analysis to look, for exmaple, values that are loaded and then saved to the same location, which is beyond the scope of my code. There are also a number of simpler tests, like a TAX followed by a TXA that can be replaced by a TXA, or useless code like ORA #0. These are quite rare, but still worth looking for, and have been added to this program.
 
 * Lin6 by Devine Lu Linvega, https://git.sr.ht/~rabbits/lin6
 
