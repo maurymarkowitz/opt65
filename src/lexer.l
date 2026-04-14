@@ -4,6 +4,26 @@
 #include <string.h>
 #include <stddef.h>  /* for size_t */
 #include "parser.tab.h"
+extern int reported_line;
+
+static int contains_non_ascii(const char *text) {
+    for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
+        if (*p >= 0x80) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+#define YY_USER_ACTION \
+    do { \
+        if (yytext[0] != '\n' && contains_non_ascii(yytext)) { \
+            if (YY_START != COMMENT && yytext[0] != '\'') { \
+                fprintf(stderr, "Warning: Non-ASCII character in token at line %d, outside comment or string constant\n", reported_line); \
+            } \
+        } \
+        if (yytext[0] != '\n') reported_line = yylineno; \
+    } while (0);
 %}
 
 %option yylineno
@@ -189,9 +209,20 @@
     return DEC_NUMBER;
 }
 
+ /* UTF-8 sequences (warn once per character, not per byte) */
+[\xC2-\xDF][\x80-\xBF] {
+    /* Fall through to YY_USER_ACTION warning and skip invalid token. */
+}
+[\xE0-\xEF][\x80-\xBF][\x80-\xBF] {
+    /* Fall through to YY_USER_ACTION warning and skip invalid token. */
+}
+[\xF0-\xF7][\x80-\xBF][\x80-\xBF][\x80-\xBF] {
+    /* Fall through to YY_USER_ACTION warning and skip invalid token. */
+}
+
  /* catch-all */
 . {
-    fprintf(stderr, "Unknown character: '%c' at line %d\n", yytext[0], yylineno);
+    fprintf(stderr, "Unknown character: '%c' at line %d\n", yytext[0], reported_line);
 }
 
 <<EOF>> {

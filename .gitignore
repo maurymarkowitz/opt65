@@ -12,16 +12,21 @@ parser.tab.o
 
 # Binary output
 *.bin
+*.dSYM
 
 # Test output files
 test_*.bin
+tests/
 
 # Executable binary
 opt65
 
 # macOS files
 .DS_Store
+.vscode
 
 # Atari operating system source file
 atari operating system source.asm.txt
 
+# Plans and documentation directory
+plans/

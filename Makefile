@@ -2,6 +2,7 @@ SHELL = /bin/bash
 
 CC = gcc
 CFLAGS = -Wall -Wextra -std=c99 -Isrc
+LEX_CFLAGS = -Wno-unused-function -Wno-unneeded-internal-declaration -Wno-sign-compare
 FLEX = flex
 BISON = bison
 
@@ -22,6 +23,9 @@ parser.tab.c parser.tab.h: $(SRCDIR)/parser.y
 
 lex.yy.c: $(SRCDIR)/lexer.l parser.tab.h
 	$(FLEX) $(SRCDIR)/lexer.l
+
+lex.yy.o: lex.yy.c
+	$(CC) $(CFLAGS) $(LEX_CFLAGS) -c lex.yy.c -o lex.yy.o
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

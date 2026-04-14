@@ -8,7 +8,7 @@
 extern FILE *yyin;
 extern int yylex(void);
 extern int yyparse(void);
-extern int yylineno;
+int reported_line = 1;
 char *yyfilename = NULL;
 
 /* Flex buffer functions for macro expansion */
@@ -18,6 +18,7 @@ extern void yypush_buffer_state(YY_BUFFER_STATE new_buffer);
 extern void yypop_buffer_state(void);
 
 void yyerror(const char *s);
+int eval_branch_target(char *expr, uint16_t *target);
 
 /* Symbol table */
 typedef struct {
@@ -52,6 +53,10 @@ int if_stack_depth = 0;
 
 /* Pending identifier for multi-label support (e.g., DEGFLG on one line, RADFLG: .RES 1 on next) */
 static char *pending_identifier = NULL;
+static char *branch_undefined_symbol = NULL;
+static int suppress_undefined_symbol_warning = 0;
+static char *last_undefined_symbol = NULL;
+static int last_undefined_line = 0;
 
 /* Forward declaration */
 int is_conditional_active(void);
@@ -72,6 +77,7 @@ int pass = 1;  /* 1 = symbol collection, 2 = code generation */
 uint16_t eval_expr(char *expr);
 void add_symbol(char *name, uint16_t value);
 uint16_t get_symbol(char *name);
+int eval_branch_target(char *expr, uint16_t *target);
 void emit_byte(uint8_t byte);
 void emit_word(uint16_t word);
 void emit_dbyte(uint16_t word);
@@ -173,7 +179,7 @@ if_block:
     IF expr_value NEWLINE {
         int condition = $2 != 0;
         if (if_stack_depth >= MAX_IF_DEPTH) {
-            fprintf(stderr, "Error: IF nesting too deep at line %d\n", yylineno);
+            fprintf(stderr, "Error: IF nesting too deep at line %d\n", reported_line);
         } else {
             if_stack[if_stack_depth++] = condition ? 1 : 0;
         }
@@ -183,7 +189,7 @@ if_block:
 endif_directive:
     ENDIF NEWLINE {
         if (if_stack_depth == 0) {
-            fprintf(stderr, "Error: ENDIF without matching IF at line %d\n", yylineno);
+            fprintf(stderr, "Error: ENDIF without matching IF at line %d\n", reported_line);
         } else {
             if_stack_depth--;
         }
@@ -260,13 +266,13 @@ implied_instruction:
     | PHA { 
         emit_opcode(0x48);
         extern char *yyfilename;
-        stats_record_instruction(0x48, "PHA", 0, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x48, "PHA", 0, reported_line, yyfilename, NULL);
     }
     | PHP { emit_opcode(0x08); }
     | PLA { 
         emit_opcode(0x68);
         extern char *yyfilename;
-        stats_record_instruction(0x68, "PLA", 0, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x68, "PLA", 0, reported_line, yyfilename, NULL);
     }
     | PLP { emit_opcode(0x28); }
     | RTI { emit_opcode(0x40); }
@@ -274,7 +280,7 @@ implied_instruction:
     | RTS { 
         emit_opcode(0x60);
         extern char *yyfilename;
-        stats_record_instruction(0x60, "RTS", 0, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x60, "RTS", 0, reported_line, yyfilename, NULL);
     }
     | RTS IDENTIFIER { emit_opcode(0x60); }  /* Allow optional label annotation like RTS RETURN */
     | RTS ADC { emit_opcode(0x60); }  /* Ignore any token after RTS */
@@ -349,32 +355,32 @@ implied_instruction:
     | TAX { 
         emit_opcode(0xAA);
         extern char *yyfilename;
-        stats_record_instruction(0xAA, "TAX", 0, yylineno, yyfilename, NULL);
+        stats_record_instruction(0xAA, "TAX", 0, reported_line, yyfilename, NULL);
     }
     | TAY { 
         emit_opcode(0xA8);
         extern char *yyfilename;
-        stats_record_instruction(0xA8, "TAY", 0, yylineno, yyfilename, NULL);
+        stats_record_instruction(0xA8, "TAY", 0, reported_line, yyfilename, NULL);
     }
     | TSX { 
         emit_opcode(0xBA);
         extern char *yyfilename;
-        stats_record_instruction(0xBA, "TSX", 0, yylineno, yyfilename, NULL);
+        stats_record_instruction(0xBA, "TSX", 0, reported_line, yyfilename, NULL);
     }
     | TXA { 
         emit_opcode(0x8A);
         extern char *yyfilename;
-        stats_record_instruction(0x8A, "TXA", 0, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x8A, "TXA", 0, reported_line, yyfilename, NULL);
     }
     | TXS { 
         emit_opcode(0x9A);
         extern char *yyfilename;
-        stats_record_instruction(0x9A, "TXS", 0, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x9A, "TXS", 0, reported_line, yyfilename, NULL);
     }
     | TYA { 
         emit_opcode(0x98);
         extern char *yyfilename;
-        stats_record_instruction(0x98, "TYA", 0, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x98, "TYA", 0, reported_line, yyfilename, NULL);
     }
     ;
 
@@ -395,7 +401,7 @@ immediate_instruction:
             stats_record_immediate_zero(0x69);
         }
         extern char *yyfilename;
-        stats_record_instruction(0x69, "ADC", val, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x69, "ADC", val, reported_line, yyfilename, NULL);
     }
     | AND HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
@@ -406,7 +412,7 @@ immediate_instruction:
             stats_record_immediate_zero(0x29);
         }
         extern char *yyfilename;
-        stats_record_instruction(0x29, "AND", val, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x29, "AND", val, reported_line, yyfilename, NULL);
     }
     | CMP HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
@@ -444,7 +450,7 @@ immediate_instruction:
             stats_record_immediate_zero(0x49);
         }
         extern char *yyfilename;
-        stats_record_instruction(0x49, "EOR", val, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x49, "EOR", val, reported_line, yyfilename, NULL);
     }
     | LDA HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
@@ -455,14 +461,14 @@ immediate_instruction:
             stats_record_immediate_zero(0xA9);
         }
         extern char *yyfilename;
-        stats_record_instruction(0xA9, "LDA", val, yylineno, yyfilename, $3);
+        stats_record_instruction(0xA9, "LDA", val, reported_line, yyfilename, $3);
     }
     | LDX HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
         emit_opcode(0xA2); 
         emit_byte(val);
         extern char *yyfilename;
-        stats_record_instruction(0xA2, "LDX", val, yylineno, yyfilename, $3);
+        stats_record_instruction(0xA2, "LDX", val, reported_line, yyfilename, $3);
         if (val == 0) {
             check_zero_transfer("LDX #0", 0xA2, $3);
             stats_record_immediate_zero(0xA2);
@@ -473,7 +479,7 @@ immediate_instruction:
         emit_opcode(0xA0); 
         emit_byte(val);
         extern char *yyfilename;
-        stats_record_instruction(0xA0, "LDY", val, yylineno, yyfilename, $3);
+        stats_record_instruction(0xA0, "LDY", val, reported_line, yyfilename, $3);
         if (val == 0) {
             check_zero_transfer("LDY #0", 0xA0, $3);
             stats_record_immediate_zero(0xA0);
@@ -488,7 +494,7 @@ immediate_instruction:
             stats_record_immediate_zero(0x09);
         }
         extern char *yyfilename;
-        stats_record_instruction(0x09, "ORA", val, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x09, "ORA", val, reported_line, yyfilename, NULL);
     }
     | SBC HASH expression { 
         uint8_t val = eval_expr($3) & 0xFF;
@@ -499,7 +505,7 @@ immediate_instruction:
             stats_record_immediate_zero(0xE9);
         }
         extern char *yyfilename;
-        stats_record_instruction(0xE9, "SBC", val, yylineno, yyfilename, NULL);
+        stats_record_instruction(0xE9, "SBC", val, reported_line, yyfilename, NULL);
     }
     ;
 
@@ -515,7 +521,7 @@ address_instruction:
         if (addr == 0) check_zero_transfer("AND $00", 0x25, $2);
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0x25 : 0x2D;
-        stats_record_instruction(op, "AND", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "AND", addr, reported_line, yyfilename, NULL);
     }
     | ASL expression { 
         /* Check if expression is just "A" - if so, use accumulator form */
@@ -554,7 +560,7 @@ address_instruction:
             emit_opcode(0x4C);
             emit_word(addr);
             extern char *yyfilename;
-            stats_record_instruction(0x4C, "JMP", addr, yylineno, yyfilename, $2);
+            stats_record_instruction(0x4C, "JMP", addr, reported_line, yyfilename, $2);
         } else {
             emit_opcode(0x4C);
             emit_word(0);
@@ -566,7 +572,7 @@ address_instruction:
             emit_opcode(0x20);
             emit_word(addr);
             extern char *yyfilename;
-            stats_record_instruction(0x20, "JSR", addr, yylineno, yyfilename, $2);
+            stats_record_instruction(0x20, "JSR", addr, reported_line, yyfilename, $2);
         } else {
             emit_opcode(0x20);
             emit_word(0);
@@ -578,21 +584,21 @@ address_instruction:
         if (addr == 0) check_zero_transfer("LDA $00", 0xA5, $2);
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0xA5 : 0xAD;
-        stats_record_instruction(op, "LDA", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "LDA", addr, reported_line, yyfilename, NULL);
     }
     | LDX expression { 
         uint16_t addr = eval_expr($2);
         uint8_t op = emit_addr(0xA6, 0xAE, $2);
         if (addr == 0) check_zero_transfer("LDX $00", 0xA6, $2);
         extern char *yyfilename;
-        stats_record_instruction(op, "LDX", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "LDX", addr, reported_line, yyfilename, NULL);
     }
     | LDY expression { 
         uint16_t addr = eval_expr($2);
         uint8_t op = emit_addr(0xA4, 0xAC, $2);
         if (addr == 0) check_zero_transfer("LDY $00", 0xA4, $2);
         extern char *yyfilename;
-        stats_record_instruction(op, "LDY", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "LDY", addr, reported_line, yyfilename, NULL);
     }
     | LSR expression { 
         /* Check if expression is just "A" - if so, use accumulator form */
@@ -608,7 +614,7 @@ address_instruction:
         if (addr == 0) check_zero_transfer("ORA $00", 0x05, $2);
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0x05 : 0x0D;
-        stats_record_instruction(op, "ORA", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "ORA", addr, reported_line, yyfilename, NULL);
     }
     | ROL expression { 
         /* Check if expression is just "A" - if so, use accumulator form */
@@ -640,21 +646,21 @@ address_instruction:
         }
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0x85 : 0x8D;
-        stats_record_instruction(op, "STA", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "STA", addr, reported_line, yyfilename, NULL);
     }
     | STX expression { 
         uint16_t addr = eval_expr($2);
         uint8_t op = emit_addr(0x86, 0x8E, $2);
         if (addr == 0) check_zero_transfer("STX $00", 0x86, $2);
         extern char *yyfilename;
-        stats_record_instruction(op, "STX", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "STX", addr, reported_line, yyfilename, NULL);
     }
     | STY expression { 
         uint16_t addr = eval_expr($2);
         uint8_t op = emit_addr(0x84, 0x8C, $2);
         if (addr == 0) check_zero_transfer("STY $00", 0x84, $2);
         extern char *yyfilename;
-        stats_record_instruction(op, "STY", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "STY", addr, reported_line, yyfilename, NULL);
     }
     ;
 
@@ -675,13 +681,13 @@ indexed_instruction:
         emit_indexed(0xB5, 0xBD, $2);
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0xB5 : 0xBD;
-        stats_record_instruction(op, "LDA", addr, yylineno, yyfilename, $2);
+        stats_record_instruction(op, "LDA", addr, reported_line, yyfilename, $2);
     }
     | LDA expression COMMA YREG { 
         uint16_t addr = eval_expr($2);
         emit_indexed(0xB9, 0xB9, $2);
         extern char *yyfilename;
-        stats_record_instruction(0xB9, "LDA", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(0xB9, "LDA", addr, reported_line, yyfilename, NULL);
     }
     | LDX expression COMMA YREG { emit_indexed(0xB6, 0xBE, $2); }
     | LDY expression COMMA XREG { emit_indexed(0xB4, 0xBC, $2); }
@@ -697,13 +703,13 @@ indexed_instruction:
         emit_indexed(0x95, 0x9D, $2);
         extern char *yyfilename;
         uint8_t op = (addr < 256) ? 0x95 : 0x9D;
-        stats_record_instruction(op, "STA", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(op, "STA", addr, reported_line, yyfilename, NULL);
     }
     | STA expression COMMA YREG { 
         uint16_t addr = eval_expr($2);
         emit_indexed(0x99, 0x99, $2);
         extern char *yyfilename;
-        stats_record_instruction(0x99, "STA", addr, yylineno, yyfilename, NULL);
+        stats_record_instruction(0x99, "STA", addr, reported_line, yyfilename, NULL);
     }
     | STX expression COMMA YREG { 
         uint16_t addr = eval_expr($2);
@@ -754,15 +760,16 @@ indirect_instruction:
 relative_instruction:
     BCC expression { 
         if (pass == 2) {
-            uint16_t target = eval_expr($2);
+            uint16_t target;
+            int undefined = eval_branch_target($2, &target);
             int16_t offset = (int16_t)(target - (pc + 1));
-            if (offset < -128 || offset > 127) {
-                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            if (!undefined && (offset < -128 || offset > 127)) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", reported_line, target, offset);
             }
             emit_opcode(0x90); 
             emit_byte(offset & 0xFF);
             extern char *yyfilename;
-            stats_record_instruction(0x90, "BCC", target, yylineno, yyfilename, $2);
+            stats_record_instruction(0x90, "BCC", target, reported_line, yyfilename, $2);
         } else {
             /* Pass 1: Just advance PC */
             emit_opcode(0x90);
@@ -771,15 +778,16 @@ relative_instruction:
     }
     | BCS expression { 
         if (pass == 2) {
-            uint16_t target = eval_expr($2);
+            uint16_t target;
+            int undefined = eval_branch_target($2, &target);
             int16_t offset = (int16_t)(target - (pc + 1));
-            if (offset < -128 || offset > 127) {
-                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            if (!undefined && (offset < -128 || offset > 127)) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", reported_line, target, offset);
             }
             emit_opcode(0xB0); 
             emit_byte(offset & 0xFF);
             extern char *yyfilename;
-            stats_record_instruction(0xB0, "BCS", target, yylineno, yyfilename, $2);
+            stats_record_instruction(0xB0, "BCS", target, reported_line, yyfilename, $2);
         } else {
             emit_opcode(0xB0);
             emit_byte(0);
@@ -787,15 +795,16 @@ relative_instruction:
     }
     | BEQ expression { 
         if (pass == 2) {
-            uint16_t target = eval_expr($2);
+            uint16_t target;
+            int undefined = eval_branch_target($2, &target);
             int16_t offset = (int16_t)(target - (pc + 1));
-            if (offset < -128 || offset > 127) {
-                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            if (!undefined && (offset < -128 || offset > 127)) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", reported_line, target, offset);
             }
             emit_opcode(0xF0); 
             emit_byte(offset & 0xFF);
             extern char *yyfilename;
-            stats_record_instruction(0xF0, "BEQ", target, yylineno, yyfilename, $2);
+            stats_record_instruction(0xF0, "BEQ", target, reported_line, yyfilename, $2);
         } else {
             emit_opcode(0xF0);
             emit_byte(0);
@@ -803,15 +812,16 @@ relative_instruction:
     }
     | BMI expression { 
         if (pass == 2) {
-            uint16_t target = eval_expr($2);
+            uint16_t target;
+            int undefined = eval_branch_target($2, &target);
             int16_t offset = (int16_t)(target - (pc + 1));
-            if (offset < -128 || offset > 127) {
-                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            if (!undefined && (offset < -128 || offset > 127)) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", reported_line, target, offset);
             }
             emit_opcode(0x30); 
             emit_byte(offset & 0xFF);
             extern char *yyfilename;
-            stats_record_instruction(0x30, "BMI", target, yylineno, yyfilename, $2);
+            stats_record_instruction(0x30, "BMI", target, reported_line, yyfilename, $2);
         } else {
             emit_opcode(0x30);
             emit_byte(0);
@@ -819,15 +829,16 @@ relative_instruction:
     }
     | BNE expression { 
         if (pass == 2) {
-            uint16_t target = eval_expr($2);
+            uint16_t target;
+            int undefined = eval_branch_target($2, &target);
             int16_t offset = (int16_t)(target - (pc + 1));
-            if (offset < -128 || offset > 127) {
-                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            if (!undefined && (offset < -128 || offset > 127)) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", reported_line, target, offset);
             }
             emit_opcode(0xD0); 
             emit_byte(offset & 0xFF);
             extern char *yyfilename;
-            stats_record_instruction(0xD0, "BNE", target, yylineno, yyfilename, $2);
+            stats_record_instruction(0xD0, "BNE", target, reported_line, yyfilename, $2);
         } else {
             emit_opcode(0xD0);
             emit_byte(0);
@@ -835,15 +846,16 @@ relative_instruction:
     }
     | BPL expression { 
         if (pass == 2) {
-            uint16_t target = eval_expr($2);
+            uint16_t target;
+            int undefined = eval_branch_target($2, &target);
             int16_t offset = (int16_t)(target - (pc + 1));
-            if (offset < -128 || offset > 127) {
-                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            if (!undefined && (offset < -128 || offset > 127)) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", reported_line, target, offset);
             }
             emit_opcode(0x10); 
             emit_byte(offset & 0xFF);
             extern char *yyfilename;
-            stats_record_instruction(0x10, "BPL", target, yylineno, yyfilename, $2);
+            stats_record_instruction(0x10, "BPL", target, reported_line, yyfilename, $2);
         } else {
             emit_opcode(0x10);
             emit_byte(0);
@@ -851,15 +863,16 @@ relative_instruction:
     }
     | BVC expression { 
         if (pass == 2) {
-            uint16_t target = eval_expr($2);
+            uint16_t target;
+            int undefined = eval_branch_target($2, &target);
             int16_t offset = (int16_t)(target - (pc + 1));
-            if (offset < -128 || offset > 127) {
-                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            if (!undefined && (offset < -128 || offset > 127)) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", reported_line, target, offset);
             }
             emit_opcode(0x50); 
             emit_byte(offset & 0xFF);
             extern char *yyfilename;
-            stats_record_instruction(0x50, "BVC", target, yylineno, yyfilename, $2);
+            stats_record_instruction(0x50, "BVC", target, reported_line, yyfilename, $2);
         } else {
             emit_opcode(0x50);
             emit_byte(0);
@@ -867,15 +880,16 @@ relative_instruction:
     }
     | BVS expression { 
         if (pass == 2) {
-            uint16_t target = eval_expr($2);
+            uint16_t target;
+            int undefined = eval_branch_target($2, &target);
             int16_t offset = (int16_t)(target - (pc + 1));
-            if (offset < -128 || offset > 127) {
-                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            if (!undefined && (offset < -128 || offset > 127)) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", reported_line, target, offset);
             }
             emit_opcode(0x70); 
             emit_byte(offset & 0xFF);
             extern char *yyfilename;
-            stats_record_instruction(0x70, "BVS", target, yylineno, yyfilename, $2);
+            stats_record_instruction(0x70, "BVS", target, reported_line, yyfilename, $2);
         } else {
             emit_opcode(0x70);
             emit_byte(0);
@@ -886,10 +900,11 @@ relative_instruction:
 c02_instruction:
     BRA expression { 
         if (pass == 2) {
-            uint16_t target = eval_expr($2);
+            uint16_t target;
+            int undefined = eval_branch_target($2, &target);
             int16_t offset = (int16_t)(target - (pc + 1));
-            if (offset < -128 || offset > 127) {
-                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", yylineno, target, offset);
+            if (!undefined && (offset < -128 || offset > 127)) {
+                fprintf(stderr, "Error: Branch offset out of range at line %d (target address: $%04X, offset: %d)\n", reported_line, target, offset);
             }
             emit_opcode(0x80); 
             emit_byte(offset & 0xFF);
@@ -1062,7 +1077,7 @@ macro_invocation:
             /* Buffer will be popped automatically by Flex when exhausted */
         } else {
             /* Not a macro - treat as error for now */
-            fprintf(stderr, "Error: Unknown identifier '%s' (not a macro or label) at line %d\n", $1, yylineno);
+            fprintf(stderr, "Error: Unknown identifier '%s' (not a macro or label) at line %d\n", $1, reported_line);
         }
     }
     ;
@@ -1235,7 +1250,7 @@ expr_value:
 %%
 
 void yyerror(const char *s) {
-    fprintf(stderr, "Error at line %d: %s\n", yylineno, s);
+    fprintf(stderr, "Error at line %d: %s\n", reported_line, s);
 }
 
 uint16_t eval_expr(char *expr) {
@@ -1294,7 +1309,31 @@ uint16_t get_symbol(char *name) {
     
     /* In pass 1, forward references are expected - don't warn */
     if (pass == 2) {
-        fprintf(stderr, "Warning: Undefined symbol '%s' at line %d, assuming 0\n", name, yylineno);
+        if (!suppress_undefined_symbol_warning) {
+            if (!last_undefined_symbol || strcmp(last_undefined_symbol, name) != 0 || last_undefined_line != reported_line) {
+                fprintf(stderr, "Warning: Undefined symbol '%s' at line %d, assuming 0\n", name, reported_line);
+                free(last_undefined_symbol);
+                last_undefined_symbol = strdup(name);
+                last_undefined_line = reported_line;
+            }
+        }
+        if (!branch_undefined_symbol) {
+            branch_undefined_symbol = strdup(name);
+        }
+    }
+    return 0;
+}
+
+int eval_branch_target(char *expr, uint16_t *target) {
+    branch_undefined_symbol = NULL;
+    suppress_undefined_symbol_warning = 1;
+    *target = eval_expr(expr);
+    suppress_undefined_symbol_warning = 0;
+    if (branch_undefined_symbol) {
+        fprintf(stderr, "Error: Branch offset to undefined symbol '%s' line %d, assuming offset 0\n", branch_undefined_symbol, reported_line);
+        free(branch_undefined_symbol);
+        branch_undefined_symbol = NULL;
+        return 1;
     }
     return 0;
 }
