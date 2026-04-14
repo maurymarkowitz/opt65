@@ -29,7 +29,7 @@ endif
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS) -ll || $(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS) -lfl
+	$(CC) $(CFLAGS) -o $(TARGET) $(OBJECTS)
 
 parser.tab.c parser.tab.h: $(SRCDIR)/parser.y
 	$(BISON) -d $(SRCDIR)/parser.y

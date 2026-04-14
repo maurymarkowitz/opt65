@@ -29,6 +29,7 @@
 #include <string.h>
 #include <stdint.h>
 #include <unistd.h>
+#include <getopt.h>
 #include "stats.h"
 
 /** @brief Version string for opt65 */
@@ -205,7 +206,6 @@ int main(int argc, char *argv[]) {
     extern uint16_t pc;
     extern uint16_t org_address;
     extern uint8_t output[];
-    extern int symbol_count;
     
     /* Pass 1: Build symbol table */
     pass = 1;

@@ -1350,10 +1350,6 @@ int is_conditional_active(void) {
 
 void emit_byte(uint8_t byte) {
     if (!is_conditional_active()) return;  /* Skip if in false conditional block */
-    if (pc > 65535) {
-        fprintf(stderr, "Error: Program counter overflow\n");
-        return;
-    }
     if (pass == 2) {
         output[pc] = byte;  /* Only write to output in pass 2 */
         /* Track actual address range where bytes were emitted */

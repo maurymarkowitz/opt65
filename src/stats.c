@@ -42,8 +42,8 @@ typedef struct {
     char type[32];  /* "STZ", "PHX", "PHY", "PLX", "PLY", "BRA" */
     int line_num;
     char filename[256];
-    char old_code[64];
-    char new_code[64];
+    char old_code[256];
+    char new_code[256];
     int bytes_saved;  /* Number of bytes saved by this replacement */
     uint16_t instr_addr;  /* Address of the instruction (for BRA replacements) */
     uint16_t target_addr;  /* Target address (for BRA replacements) */
