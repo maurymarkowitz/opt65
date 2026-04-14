@@ -5,6 +5,8 @@ Version 1.1 - minor fixes, 2026 April 14
 - fix the off-by-one in the line numbers in errors and warnings
 - warnings no longer get reported more than once
 - added warnings for non-ASCII characters that normally implies OCR issues
+- added CI build machinery to automatically make binary downloads
+- add homebrew and tap support
 
 Version 1.0 - initial release, 2026
 

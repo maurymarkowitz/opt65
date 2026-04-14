@@ -1,0 +1,61 @@
+name: Update Homebrew Tap
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to use (e.g. v1.0.0)'
+        required: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Download release tarball
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag_name }}"
+          if [ -n "${{ github.event.release.tarball_url }}" ]; then
+            URL="${{ github.event.release.tarball_url }}"
+          else
+            URL="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          fi
+          curl -L -o source.tar.gz "${URL}"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          echo "sha=$(sha256sum source.tar.gz | cut -d ' ' -f1)" >> $GITHUB_OUTPUT
+
+      - name: Checkout homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: maurymarkowitz/homebrew-tap
+          token: ${{ secrets.HOMEBREW_AND_SCOOP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_AND_SCOOP_TOKEN }}
+        run: |
+          cd homebrew-tap
+
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag_name }}"
+          url="https://github.com/${{ github.repository }}/archive/refs/tags/${TAG}.tar.gz"
+          sha="${{ steps.sha.outputs.sha }}"
+
+          sed -i "s|^  url \".*\"|  url \"${url}\"|" Formula/opt65.rb
+          sed -i "s|^  sha256 \".*\"|  sha256 \"${sha}\"|" Formula/opt65.rb
+
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git remote set-url origin "https://x-access-token:${{ secrets.HOMEBREW_AND_SCOOP_TOKEN }}@github.com/maurymarkowitz/homebrew-tap.git"
+
+          git add Formula/opt65.rb
+          git commit -m "Update opt65 to ${TAG}"
+          git push

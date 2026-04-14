@@ -1,0 +1,170 @@
+.\" Copyright 2026 by Maury Markowitz
+.\" 
+.\" You may distribute under the terms of the GNU General Public
+.\" License V.2 as specified in the LICENSE file that comes with
+.\" the opt65 distribution.  
+
+.TH OPT65 1 "14 April 2026" v1.1.0 "opt65"
+.LO 1
+
+.SH NAME
+.B opt65
+\- analyze and optimize 6502/65C02 assembly code
+
+.SH SYNOPSIS
+.B opt65
+.RB [ \-hvnps ]
+.RB [ \-o 
+.IR file ]
+.I input.asm
+.RB [ output.bin ]
+
+.SH DESCRIPTION 
+.B opt65
+is an assembler and analyzer designed to parse 6502 and 65C02 assembly language code and suggest optimizations. Unlike traditional assemblers, opt65 prioritizes code analysis and statistical reporting over production compilation. It performs a two-pass assembly process to build a symbol table and generate code, producing a binary output file for validation purposes while generating detailed statistics and optimization recommendations.
+
+The tool is particularly useful for understanding code composition, identifying optimization patterns in existing assembly code, and evaluating the potential benefits of upgrading from 6502 to 65C02 instruction sets.
+
+.SH OPTIONS
+.TP
+.B \-h, \--help
+Print a help message and exit.
+.TP
+.B \-v, \--version
+Print version information and exit.
+.TP
+.BI \-o file,
+.BI \--output-file file
+Specify the output binary filename. If not provided, defaults to the input filename with .bin extension.
+.TP
+.B \-n, \--no-code
+Do not generate binary output file. Useful when only statistics and analysis are needed.
+.TP
+.B \-p, \--print-stats
+Print statistics report without individual optimization suggestions. Provides summary metrics only.
+.TP
+.B \-s, \--suggestions
+Print detailed line-by-line 65C02 replacement suggestions. Shows individual code changes that could be made to upgrade to 65C02.
+
+.SH DESCRIPTION
+.B opt65
+analyzes assembly source code and generates a comprehensive report on code structure, instruction usage, and optimization opportunities. The report includes several sections:
+
+.SS Output Sections
+
+.B Source Code Statistics
+includes the total number of lines in the file, actual code lines (excluding comments and blank lines), and counts of defined symbols.
+
+.B Binary Code Statistics
+reports the starting and ending addresses, total bytes of generated code, and the number of empty pages (gaps in address space).
+
+.B Opcode Frequencies
+lists the most-used instructions in descending order, helping identify optimization hot spots and code patterns.
+
+.B Summary Statistics
+shows the total instruction count, number of 65C02 upgrades available, JMP to BRA replacement opportunities, zero-page optimizations, redundant instruction patterns, and estimated code size reduction if upgraded to 65C02.
+
+.SH DEFAULT BEHAVIOR
+When invoked without the
+.B -p
+or
+.B -s
+flags, opt65 prints the complete report including all sections above. This is the recommended mode for general analysis.
+
+When
+.B -p
+is specified, only the statistics summary is printed, without line-by-line suggestions.
+
+When
+.B -s
+is specified, detailed 65C02 replacement suggestions are printed for each optimization opportunity identified.
+
+.SH SUPPORTED DIALECTS
+.B opt65
+primarily targets the Microtek PDP-11 cross-assembler dialect used for early systems like the Atari operating system. Support includes:
+
+.IP \(bu 2
+Standard 6502 and 65C02 mnemonics
+.IP \(bu 2
+Labels (symbols followed by colons)
+.IP \(bu 2
+Comments (semicolon-prefixed text)
+.IP \(bu 2
+Pseudo-operations: ORG, EQU, DS, DB, DW
+.IP \(bu 2
+All standard 6502/65C02 addressing modes
+.IP \(bu 2
+Symbol references with forward references
+
+.SS Known Limitations
+
+The Bison parser grammar contains 12 shift/reduce and 86 reduce/reduce conflicts, which is documented but typically doesn't cause issues for well-formed assembly.
+
+Macros are recognized but not fully expanded. Conditional assembly (IF/ENDIF) is not supported. All symbols are global; local labels are not available.
+
+.SH EXAMPLES
+
+.B opt65 firmware.asm
+\- analyze firmware.asm, generate firmware.bin, and print the full report with statistics and suggestions.
+
+.B opt65 -s program.asm
+\- show detailed line-by-line 65C02 optimization recommendations.
+
+.B opt65 -n -p code.asm
+\- analyze code.asm without generating binary output, and print only the statistics summary.
+
+.B opt65 -o build/output.bin src/os.asm
+\- read from src/os.asm, write binary to build/output.bin, and print the full report.
+
+.SH REAL-WORLD EXAMPLE
+
+.B opt65 atari-os.asm
+\- analyzing a 10,000+ line assembly file for the Atari operating system reveals that 33 of 100 JMP instructions could be replaced with the shorter BRA instruction available on 65C02, and approximately 84 load instructions with immediate #0 could benefit from hypothetical LZA/LZX/LZY opcodes. Overall, upgrading to 65C02 would reduce code size by approximately 3%, translating to 300 bytes of savings in a 64KB system.
+
+.SH ASSEMBLY PROCESS
+
+.B opt65
+uses a two-pass assembly model:
+
+.B Pass 1
+parses the input file and builds a symbol table of all defined labels and variables. Any syntax errors encountered here are reported with line numbers.
+
+.B Pass 2
+generates binary code with all symbol references resolved. This ensures that forward references to labels defined later in the code are properly handled.
+
+After both passes, statistics are collected and reported unless suppressed with the
+.B -n
+flag.
+
+.SH STATISTICS INTERPRETATION
+
+The statistics output provides several useful metrics:
+
+.TP
+.B "6502 Instructions"
+Total number of CPU instructions in the assembled code.
+.TP
+.B "65C02 Upgrades Available"
+Count of instructions that could be replaced with 65C02-specific opcodes.
+.TP
+.B "JMP to BRA replacements"
+Short JMP instructions that could use the relative branch instruction (BRA), which is shorter and more efficient.
+.TP
+.B "Zero-page optimizations"
+Load instructions with immediate #0 that might benefit from hypothetical faster load-zero instructions.
+.TP
+.B "Redundant instructions"
+Patterns like TAX/TXA that could be optimized away or replaced.
+.TP
+.B "Estimated size reduction"
+Predicted percentage reduction in code size if all 65C02 optimizations were applied.
+
+.SH TROUBLESHOOTING
+
+See the comprehensive manual at
+.B docs/opt65\ manual.md
+for detailed troubleshooting, build instructions, and platform-specific information.
+
+.SH AUTHORS
+
+Maury Markowitz is the author of opt65. The tool is inspired by similar projects including Daniel Dallmann's opt65 peephole optimizer, Devine Lu Linvega's Lin6 linter, and Andrew Dunai's Nice65 assembler.

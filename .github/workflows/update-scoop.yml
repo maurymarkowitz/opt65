@@ -1,0 +1,82 @@
+name: Update Scoop Manifest
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag to use (e.g. v1.0.0)'
+        required: true
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check HOMEBREW_AND_SCOOP_TOKEN secret
+        run: |
+          if [ -z "${{ secrets.HOMEBREW_AND_SCOOP_TOKEN }}" ]; then
+            echo "ERROR: HOMEBREW_AND_SCOOP_TOKEN secret is not set. Add it to the repository secrets and rerun."
+            exit 1
+          fi
+
+      - name: Checkout scoop bucket
+        uses: actions/checkout@v4
+        with:
+          repository: maurymarkowitz/scoop-bucket
+          token: ${{ secrets.HOMEBREW_AND_SCOOP_TOKEN }}
+          path: scoop-bucket
+
+      - name: Download Windows release asset
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag_name }}"
+          RELEASE_URL="${{ github.server_url }}/${{ github.repository }}/releases/download/${TAG}/opt65-windows-x86_64.zip"
+          curl -L -o opt65-windows-x86_64.zip "$RELEASE_URL"
+
+      - name: Compute SHA256
+        run: |
+          HASH=$(sha256sum opt65-windows-x86_64.zip | cut -d ' ' -f1)
+          echo "HASH=$HASH" >> $GITHUB_ENV
+
+      - name: Update scoop manifest
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag_name }}"
+          VERSION=${TAG}
+          VERSION=${VERSION#v}
+          HASH=$(sha256sum opt65-windows-x86_64.zip | cut -d ' ' -f1)
+          MANIFEST="scoop-bucket/bucket/opt65.json"
+          if [ ! -f "$MANIFEST" ]; then
+            echo "ERROR: Manifest not found at $MANIFEST"
+            find scoop-bucket -name "*.json" -type f
+            exit 1
+          fi
+          echo "Updating: $MANIFEST"
+          echo "VERSION: $VERSION"
+          echo "HASH: $HASH"
+          TAG_WITH_V="v${VERSION}"
+          if [ "$TAG" != "$TAG_WITH_V" ]; then
+            TAG_WITH_V="$TAG"
+          fi
+          echo "TAG (for URL): $TAG_WITH_V"
+          # Use jq to reliably update JSON fields
+          jq ".version = \"${VERSION}\" | .url = \"https://github.com/${{ github.repository }}/releases/download/${TAG_WITH_V}/opt65-windows-x86_64.zip\" | .hash = \"${HASH}\"" "$MANIFEST" > "${MANIFEST}.tmp" && mv "${MANIFEST}.tmp" "$MANIFEST"
+          echo "Updated manifest:"
+          cat "$MANIFEST"
+
+      - name: Commit & push updates
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_AND_SCOOP_TOKEN }}
+        run: |
+          cd scoop-bucket
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git remote set-url origin "https://x-access-token:${{ secrets.HOMEBREW_AND_SCOOP_TOKEN }}@github.com/maurymarkowitz/scoop-bucket.git"
+          git diff --stat
+          git add bucket/opt65.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit. Skipping push."
+            exit 0
+          fi
+          git commit -m "Update scoop manifest for ${{ github.event.release.tag_name || github.event.inputs.tag_name }}"
+          git push
