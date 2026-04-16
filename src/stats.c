@@ -1931,6 +1931,19 @@ static void print_immediate_zero_statistics(void) {
     }
     printf("\n");
 
+    int immediate_zero_bytes_saved = 0;
+    for (int i = 0; i < replacement_count; i++) {
+        if (strcmp(replacements[i].type, "STZ") == 0) {
+            immediate_zero_bytes_saved += replacements[i].bytes_saved;
+        }
+    }
+    printf("Total bytes saved: %d", immediate_zero_bytes_saved);
+    if (total_opcode_bytes > 0) {
+        double percent = (double)immediate_zero_bytes_saved * 100.0 / (double)total_opcode_bytes;
+        printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
+    }
+    printf("\n\n");
+
     opcode_entry_t zero_entries[256];
     int zero_entry_count = 0;
     for (int i = 0; i < NUM_OPCODES; i++) {
