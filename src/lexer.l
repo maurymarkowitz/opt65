@@ -158,10 +158,10 @@ static int contains_non_ascii(const char *text) {
 "\.END"|"END"         { return END; }
 "\.ENDIF"|"ENDIF"     { return ENDIF; }
 "\.ORG"|"ORG"         { return ORG; }
-"\.BYTE"|"BYTE"       { return BYTE; }
-"\.WORD"|"WORD"       { return WORD; }
+"\.BYTE"|"BYTE"|"DB"  { return BYTE; }
+"\.WORD"|"WORD"|"DW"  { return WORD; }
 "\.DBYTE"|"DBYTE"     { return DBYTE; }
-"\.RES"|"RES"         { return RES; }
+"\.RES"|"RES"|"DS"    { return RES; }
 "\.EQU"|"EQU"         { return EQU; }
 "\.PAGE"|"PAGE"       { return PAGE; }
 "\.LIST"|"LIST"       { return LIST; }

@@ -1341,31 +1341,153 @@ void yyerror(const char *s) {
     fprintf(stderr, "Error at line %d: %s\n", yylineno, s);
 }
 
+/* Forward declaration for recursive expression evaluator */
+static uint16_t eval_expr_internal(const char *expr, int *pos, int len);
+
+/* Parse a primary value (number, symbol, or parenthesized expression) */
+static uint16_t eval_primary(const char *expr, int *pos, int len) {
+    /* Skip whitespace */
+    while (*pos < len && (expr[*pos] == ' ' || expr[*pos] == '\t')) {
+        (*pos)++;
+    }
+    
+    if (*pos >= len) return 0;
+    
+    /* Handle current PC reference */
+    if (expr[*pos] == '*') {
+        (*pos)++;
+        extern uint16_t pc;
+        return pc;
+    }
+    
+    /* Handle parenthesized expressions */
+    if (expr[*pos] == '(') {
+        (*pos)++;  /* Skip '(' */
+        uint16_t result = eval_expr_internal(expr, pos, len);
+        /* Skip closing ')' if present */
+        while (*pos < len && (expr[*pos] == ' ' || expr[*pos] == '\t')) (*pos)++;
+        if (*pos < len && expr[*pos] == ')') (*pos)++;
+        return result;
+    }
+    
+    /* Handle unary minus */
+    if (expr[*pos] == '-') {
+        (*pos)++;
+        return (uint16_t)(-(int16_t)eval_primary(expr, pos, len));
+    }
+    
+    /* Handle hex numbers */
+    if (expr[*pos] == '$') {
+        (*pos)++;
+        char *endptr;
+        uint16_t result = (uint16_t)strtol(&expr[*pos], &endptr, 16);
+        *pos = endptr - expr;
+        return result;
+    }
+    
+    /* Handle octal numbers */
+    if (expr[*pos] == '@') {
+        (*pos)++;
+        char *endptr;
+        uint16_t result = (uint16_t)strtol(&expr[*pos], &endptr, 8);
+        *pos = endptr - expr;
+        return result;
+    }
+    
+    /* Handle binary numbers */
+    if (expr[*pos] == '!') {
+        (*pos)++;
+        char *endptr;
+        uint16_t result = (uint16_t)strtol(&expr[*pos], &endptr, 2);
+        *pos = endptr - expr;
+        return result;
+    }
+    
+    /* Handle decimal numbers */
+    if (expr[*pos] >= '0' && expr[*pos] <= '9') {
+        char *endptr;
+        uint16_t result = (uint16_t)strtol(&expr[*pos], &endptr, 10);
+        *pos = endptr - expr;
+        return result;
+    }
+    
+    /* Handle identifiers (symbols) */
+    if ((expr[*pos] >= 'A' && expr[*pos] <= 'Z') || 
+        (expr[*pos] >= 'a' && expr[*pos] <= 'z') || 
+        expr[*pos] == '_') {
+        char ident[256];
+        int ident_len = 0;
+        while (*pos < len && ident_len < 255 && 
+               ((expr[*pos] >= 'A' && expr[*pos] <= 'Z') ||
+                (expr[*pos] >= 'a' && expr[*pos] <= 'z') ||
+                (expr[*pos] >= '0' && expr[*pos] <= '9') ||
+                expr[*pos] == '_' || expr[*pos] == '?')) {
+            ident[ident_len++] = expr[*pos];
+            (*pos)++;
+        }
+        ident[ident_len] = '\0';
+        return get_symbol(ident);
+    }
+    
+    return 0;
+}
+
+/* Parse multiplication and division (higher precedence) */
+static uint16_t eval_mul_div(const char *expr, int *pos, int len) {
+    uint16_t result = eval_primary(expr, pos, len);
+    
+    while (*pos < len) {
+        /* Skip whitespace */
+        while (*pos < len && (expr[*pos] == ' ' || expr[*pos] == '\t')) (*pos)++;
+        if (*pos >= len) break;
+        
+        if (expr[*pos] == '*' && (*pos == 0 || expr[*pos-1] != '*')) {
+            (*pos)++;
+            result = (uint16_t)(((uint32_t)result * eval_primary(expr, pos, len)) & 0xFFFF);
+        } else if (expr[*pos] == '/') {
+            (*pos)++;
+            uint16_t divisor = eval_primary(expr, pos, len);
+            if (divisor != 0) {
+                result = result / divisor;
+            }
+        } else {
+            break;
+        }
+    }
+    
+    return result;
+}
+
+/* Parse addition and subtraction (lower precedence) */
+static uint16_t eval_expr_internal(const char *expr, int *pos, int len) {
+    uint16_t result = eval_mul_div(expr, pos, len);
+    
+    while (*pos < len) {
+        /* Skip whitespace */
+        while (*pos < len && (expr[*pos] == ' ' || expr[*pos] == '\t')) (*pos)++;
+        if (*pos >= len) break;
+        
+        if (expr[*pos] == '+') {
+            (*pos)++;
+            result = (uint16_t)((result + eval_mul_div(expr, pos, len)) & 0xFFFF);
+        } else if (expr[*pos] == '-') {
+            (*pos)++;
+            result = (uint16_t)((result - eval_mul_div(expr, pos, len)) & 0xFFFF);
+        } else {
+            break;
+        }
+    }
+    
+    return result;
+}
+
+/* Main expression evaluator - parses from the beginning of the string */
 uint16_t eval_expr(char *expr) {
-    if (!expr) return 0;
+    if (!expr || *expr == '\0') return 0;
     
-    /* Check if it's a hex number */
-    if (expr[0] == '$') {
-        return (uint16_t)strtol(expr + 1, NULL, 16);
-    }
-    
-    /* Check if it's an octal number */
-    if (expr[0] == '@') {
-        return (uint16_t)strtol(expr + 1, NULL, 8);
-    }
-    
-    /* Check if it's a binary number */
-    if (expr[0] == '!') {
-        return (uint16_t)strtol(expr + 1, NULL, 2);
-    }
-    
-    /* Check if it's a decimal number */
-    if (expr[0] >= '0' && expr[0] <= '9') {
-        return (uint16_t)strtol(expr, NULL, 10);
-    }
-    
-    /* Otherwise it's a symbol */
-    return get_symbol(expr);
+    int pos = 0;
+    int len = strlen(expr);
+    return eval_expr_internal(expr, &pos, len);
 }
 
 void add_symbol(char *name, uint16_t value) {
