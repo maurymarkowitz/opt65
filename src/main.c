@@ -116,7 +116,7 @@ void print_version(void) {
  * - If neither `-p` nor `-s` is specified, prints full report with all details
  * - Binary output writes only the address range containing generated code
  * - Symbol table persists from Pass 1 through Pass 2
- * - Line number tracking adjusted for parser lookahead (reported_line)
+ * - Lines with single-quoted strings are treated as constants
  */
 int main(int argc, char *argv[]) {
     char *input_file = NULL;
@@ -212,9 +212,9 @@ int main(int argc, char *argv[]) {
     pc = 0;
     org_address = 0;
     stats_init();  /* Reset stats for pass 1 */
-    extern int reported_line;
+    extern int yylineno;
     if (yyparse() != 0) {
-        fprintf(stderr, "Parse error: %s at line %d\n", yytext, reported_line);
+        fprintf(stderr, "Parse error: %s at line %d\n", yytext, yylineno);
         fclose(input);
         return 1;
     }
@@ -222,9 +222,7 @@ int main(int argc, char *argv[]) {
     /* Reset for pass 2 */
     rewind(input);
     extern int yylineno;
-    extern int reported_line;
     yylineno = 1;
-    reported_line = 1;
     
     /* Pass 2: Generate code */
     pass = 2;
@@ -241,7 +239,7 @@ int main(int argc, char *argv[]) {
     memset(output, 0, sizeof(output));
     stats_init();  /* Reset stats for pass 2 (but keep symbol table) */
     if (yyparse() != 0) {
-        fprintf(stderr, "Parse error: %s at line %d\n", yytext, reported_line);
+        fprintf(stderr, "Parse error: %s at line %d\n", yytext, yylineno);
         fclose(input);
         return 1;
     }

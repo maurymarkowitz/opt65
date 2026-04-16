@@ -71,12 +71,12 @@ static const char *opcode_names[256] = {
     [0x00] = "BRK", [0x01] = "ORA (ind,X)", [0x05] = "ORA zp", [0x06] = "ASL zp",
     [0x08] = "PHP", [0x09] = "ORA #", [0x0A] = "ASL A", [0x0D] = "ORA abs",
     [0x0E] = "ASL abs", [0x10] = "BPL", [0x11] = "ORA (ind),Y", [0x15] = "ORA zp,X",
-    [0x16] = "ASL zp,X", [0x18] = "CLC", [0x19] = "ORA abs,Y", [0x1D] = "ORA abs,X",
+    [0x16] = "ASL zp,X", [0x18] = "CLC", [0x19] = "ORA abs,Y", [0x1A] = "INC A (C02)", [0x1D] = "ORA abs,X",
     [0x1E] = "ASL abs,X", [0x20] = "JSR", [0x21] = "AND (ind,X)", [0x24] = "BIT zp",
     [0x25] = "AND zp", [0x26] = "ROL zp", [0x28] = "PLP", [0x29] = "AND #",
     [0x2A] = "ROL A", [0x2C] = "BIT abs", [0x2D] = "AND abs", [0x2E] = "ROL abs",
     [0x30] = "BMI", [0x31] = "AND (ind),Y", [0x35] = "AND zp,X", [0x36] = "ROL zp,X",
-    [0x38] = "SEC", [0x39] = "AND abs,Y", [0x3D] = "AND abs,X", [0x3E] = "ROL abs,X",
+    [0x38] = "SEC", [0x39] = "AND abs,Y", [0x3A] = "DEC A (C02)", [0x3D] = "AND abs,X", [0x3E] = "ROL abs,X",
     [0x40] = "RTI", [0x41] = "EOR (ind,X)", [0x45] = "EOR zp", [0x46] = "LSR zp",
     [0x48] = "PHA", [0x49] = "EOR #", [0x4A] = "LSR A", [0x4C] = "JMP abs",
     [0x4D] = "EOR abs", [0x4E] = "LSR abs", [0x50] = "BVC", [0x51] = "EOR (ind),Y",
@@ -96,7 +96,7 @@ static const char *opcode_names[256] = {
     [0xAD] = "LDA abs", [0xAE] = "LDX abs", [0xB0] = "BCS", [0xB1] = "LDA (ind),Y",
     [0xB4] = "LDY zp,X", [0xB5] = "LDA zp,X", [0xB6] = "LDX zp,Y", [0xB8] = "CLV",
     [0xB9] = "LDA abs,Y", [0xBA] = "TSX", [0xBC] = "LDY abs,X", [0xBD] = "LDA abs,X",
-    [0xBE] = "LDX abs,Y", [0xC0] = "CPY #", [0xC1] = "CMP (ind,X)", [0xC4] = "CPY zp",
+    [0xBE] = "LDX abs,Y", [0xC0] = "CPY #", [0xC1] = "CMP (ind,X)", [0xC2] = "INW (C02)", [0xC3] = "DEW (C02)", [0xC4] = "CPY zp",
     [0xC5] = "CMP zp", [0xC6] = "DEC zp", [0xC8] = "INY", [0xC9] = "CMP #",
     [0xCA] = "DEX", [0xCC] = "CPY abs", [0xCD] = "CMP abs", [0xCE] = "DEC abs",
     [0xD0] = "BNE", [0xD1] = "CMP (ind),Y", [0xD5] = "CMP zp,X", [0xD6] = "DEC zp,X",
@@ -111,13 +111,13 @@ static const char *opcode_names[256] = {
     [0x1C] = "TRB abs (C02)", [0x5A] = "PHY (C02)", [0x64] = "STZ zp (C02)",
     [0x74] = "STZ zp,X (C02)", [0x7A] = "PLY (C02)", [0x80] = "BRA (C02)",
     [0x9C] = "STZ abs (C02)", [0x9E] = "STZ abs,X (C02)", [0xCB] = "WAI (C02)",
-    [0xDA] = "PHX (C02)", [0xDB] = "STP (C02)", [0xFA] = "PLX (C02)"
+    [0xDA] = "PHX (C02)", [0xDB] = "STP (C02)", [0xF4] = "PHW (C02)", [0xFA] = "PLX (C02)"
 };
 
 /* 65C02 opcodes */
 static const uint8_t c02_opcodes[] = {
-    0x04, 0x0C, 0x14, 0x1C, 0x5A, 0x64, 0x74, 0x7A,
-    0x80, 0x9C, 0x9E, 0xCB, 0xDA, 0xDB, 0xFA
+    0x04, 0x0C, 0x14, 0x1A, 0x1C, 0x3A, 0x5A, 0x64, 0x74, 0x7A,
+    0x80, 0x9C, 0x9E, 0xC2, 0xC3, 0xCB, 0xDA, 0xDB, 0xF4, 0xFA
 };
 #define NUM_C02_OPCODES (sizeof(c02_opcodes) / sizeof(c02_opcodes[0]))
 
@@ -185,7 +185,7 @@ void stats_set_filename(const char *filename) {
 }
 
 /* Track PC at start of instruction for size calculation */
-static uint16_t instruction_start_pc = 0xFFFF;
+uint16_t instruction_start_pc = 0xFFFF;
 
 void stats_record_opcode(uint8_t opcode) {
     extern uint16_t pc;
@@ -1001,6 +1001,57 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
         }
     }
     
+    /* Check for 65CE02 long branch opportunities: Conditional branch over JMP */
+    if (opcode == 0x4C) {  /* JMP absolute */
+        /* Pattern: [conditional branch +3] [JMP addr] -> [inverted_branch addr (16-bit)] */
+        if (instr_history_count >= 1) {
+            instr_history_t *prev = &instr_history[instr_history_count - 1];
+            /* Check if previous instruction is a conditional branch with offset of +3 */
+            uint8_t prev_opcode = prev->opcode;
+            int is_conditional_branch = (prev_opcode == 0x10 || prev_opcode == 0x30 || prev_opcode == 0x50 || 
+                                        prev_opcode == 0x70 || prev_opcode == 0x90 || prev_opcode == 0xB0 || 
+                                        prev_opcode == 0xD0 || prev_opcode == 0xF0);
+            
+            if (is_conditional_branch && prev->operand == 3) {
+                /* Found the pattern! Record as 65CE02 long branch opportunity */
+                if (replacement_count < MAX_REPLACEMENTS) {
+                    replacement_t *r = &replacements[replacement_count];
+                    strcpy(r->type, "LONG_BRANCH");
+                    r->line_num = line_num;
+                    strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                    r->filename[sizeof(r->filename) - 1] = '\0';
+                    r->instr_addr = (uint16_t)(pc - 5);  /* Address of the branch instruction */
+                    r->target_addr = operand;  /* Target of the JMP */
+                    
+                    /* Determine inverse branch opcode name */
+                    const char *branch_name = "";
+                    const char *inverse_name = "";
+                    switch (prev_opcode) {
+                        case 0x10: branch_name = "BPL"; inverse_name = "BMI"; break;  /* Branch on Plus */
+                        case 0x30: branch_name = "BMI"; inverse_name = "BPL"; break;  /* Branch on Minus */
+                        case 0x50: branch_name = "BVC"; inverse_name = "BVS"; break;  /* Branch on Overflow Clear */
+                        case 0x70: branch_name = "BVS"; inverse_name = "BVC"; break;  /* Branch on Overflow Set */
+                        case 0x90: branch_name = "BCC"; inverse_name = "BCS"; break;  /* Branch on Carry Clear */
+                        case 0xB0: branch_name = "BCS"; inverse_name = "BCC"; break;  /* Branch on Carry Set */
+                        case 0xD0: branch_name = "BNE"; inverse_name = "BEQ"; break;  /* Branch on Not Equal */
+                        case 0xF0: branch_name = "BEQ"; inverse_name = "BNE"; break;  /* Branch on Equal */
+                    }
+                    
+                    /* Use the stored expression if it's a label, otherwise show numeric offset */
+                    if (instr_history_count > 0 && instr_history[instr_history_count - 1].expression[0] != '\0') {
+                        snprintf(r->old_code, sizeof(r->old_code), "%s +3; JMP %s", branch_name, instr_history[instr_history_count - 1].expression);
+                        snprintf(r->new_code, sizeof(r->new_code), "%s %s", inverse_name, instr_history[instr_history_count - 1].expression);
+                    } else {
+                        snprintf(r->old_code, sizeof(r->old_code), "%s +3; JMP $%04X", branch_name, operand);
+                        snprintf(r->new_code, sizeof(r->new_code), "%s $%04X", inverse_name, operand);
+                    }
+                    r->bytes_saved = 2; /* Branch rel (2) + JMP abs (3) = 5, 16-bit branch = 3, saves 2 */
+                    replacement_count++;
+                }
+            }
+        }
+    }
+    
     /* Check for JMP that could be BRA */
     if (opcode == 0x4C) {  /* JMP absolute */
         extern uint16_t pc;
@@ -1053,11 +1104,11 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
         }
     }
     
-    /* Check for JSR that could be BRS (hypothetical opcode - does not exist) */
+    /* Check for JSR that could be BSR */
     if (opcode == 0x20) {  /* JSR absolute */
         extern uint16_t pc;
-        /* Calculate offset from byte after BRS instruction
-         * JSR is at pc-3, BRS would be at pc-3, offset calculated from pc-1 */
+        /* Calculate offset from byte after BSR instruction
+         * JSR is at pc-3, BSR would be at pc-3, offset calculated from pc-1 */
         uint16_t jsr_addr = pc - 3;  /* Address of the JSR instruction */
         int16_t offset = (int16_t)(operand - (pc - 1));
         if (offset >= -128 && offset <= 127) {
@@ -1101,6 +1152,428 @@ void stats_record_instruction(uint8_t opcode, const char *instr_name, uint16_t o
                 }
                 r->bytes_saved = 1; /* JSR abs (3 bytes), BRS rel (2 bytes), saves 1 */
                 replacement_count++;
+            }
+        }
+    }
+    
+    /* Check for INW pattern: LDA addr; ADC #1; STA addr; LDA addr+1; ADC #0; STA addr+1 -> INW addr */
+    if (opcode == 0x85 && instr_history_count >= 6) {  /* STA zp (second one) */
+        instr_history_t *sta2 = &instr_history[instr_history_count - 1];  /* Current STA (addr+1) */
+        instr_history_t *adc2 = &instr_history[instr_history_count - 2];  /* ADC #0 */
+        instr_history_t *lda2 = &instr_history[instr_history_count - 3];  /* LDA addr+1 */
+        instr_history_t *sta1 = &instr_history[instr_history_count - 4];  /* STA addr */
+        instr_history_t *adc1 = &instr_history[instr_history_count - 5];  /* ADC #1 */
+        instr_history_t *lda1 = &instr_history[instr_history_count - 6];  /* LDA addr */
+        
+        /* Check pattern: LDA addr; ADC #1; STA addr; LDA addr+1; ADC #0; STA addr+1 */
+        if ((lda1->opcode == 0xA5) && adc1->opcode == 0x69 && adc1->operand == 1 &&  /* ADC #1 */
+            (sta1->opcode == 0x85) && sta1->operand == lda1->operand &&
+            (lda2->opcode == 0xA5) && lda2->operand == lda1->operand + 1 &&
+            adc2->opcode == 0x69 && adc2->operand == 0 &&  /* ADC #0 */
+            (sta2->opcode == 0x85) && sta2->operand == lda2->operand) {
+            
+            if (replacement_count < MAX_REPLACEMENTS) {
+                replacement_t *r = &replacements[replacement_count];
+                strcpy(r->type, "INW");
+                r->line_num = lda1->line_num;
+                strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                r->filename[sizeof(r->filename) - 1] = '\0';
+                r->instr_addr = lda1->pc_at_instruction;
+                r->target_addr = lda1->operand;
+                
+                if (lda1->expression[0] != '\0') {
+                    snprintf(r->old_code, sizeof(r->old_code), "LDA %s; ADC #1; STA %s; LDA %s+1; ADC #0; STA %s+1", 
+                            lda1->expression, lda1->expression, lda1->expression, lda1->expression);
+                    snprintf(r->new_code, sizeof(r->new_code), "INW %s", lda1->expression);
+                } else {
+                    snprintf(r->old_code, sizeof(r->old_code), "LDA $%02X; ADC #1; STA $%02X; LDA $%02X; ADC #0; STA $%02X", 
+                            lda1->operand, sta1->operand, lda2->operand, sta2->operand);
+                    snprintf(r->new_code, sizeof(r->new_code), "INW $%02X", lda1->operand);
+                }
+                
+                /* LDA (2) + ADC # (2) + STA (2) + LDA (2) + ADC # (2) + STA (2) = 12 bytes -> INW (3 bytes), saves 9 bytes */
+                r->bytes_saved = 9;
+                replacement_count++;
+            }
+        }
+    }
+    
+    /* Check for DEW pattern: LDA addr; SEC; SBC #1; STA addr; LDA addr+1; SBC #0; STA addr+1 -> DEW addr */
+    /* Also handles: LDA addr; SBC #1; STA addr; LDA addr+1; SBC #0; STA addr+1 (if SEC was elsewhere) */
+    if (opcode == 0x85 && instr_history_count >= 6) {  /* STA zp (second one) */
+        instr_history_t *sta2 = &instr_history[instr_history_count - 1];  /* Current STA (addr+1) */
+        instr_history_t *sbc2 = &instr_history[instr_history_count - 2];  /* SBC #0 */
+        instr_history_t *lda2 = &instr_history[instr_history_count - 3];  /* LDA addr+1 */
+        instr_history_t *sta1 = &instr_history[instr_history_count - 4];  /* STA addr */
+        instr_history_t *sbc1 = &instr_history[instr_history_count - 5];  /* SBC #1 */
+        instr_history_t *lda1 = &instr_history[instr_history_count - 6];  /* LDA addr */
+        
+        /* Check pattern: LDA addr; SBC #1; STA addr; LDA addr+1; SBC #0; STA addr+1 */
+        if ((lda1->opcode == 0xA5) && sbc1->opcode == 0xE9 && sbc1->operand == 1 &&  /* SBC #1 */
+            (sta1->opcode == 0x85) && sta1->operand == lda1->operand &&
+            (lda2->opcode == 0xA5) && lda2->operand == lda1->operand + 1 &&
+            sbc2->opcode == 0xE9 && sbc2->operand == 0 &&  /* SBC #0 */
+            (sta2->opcode == 0x85) && sta2->operand == lda2->operand) {
+            
+            if (replacement_count < MAX_REPLACEMENTS) {
+                replacement_t *r = &replacements[replacement_count];
+                strcpy(r->type, "DEW");
+                r->line_num = lda1->line_num;
+                strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                r->filename[sizeof(r->filename) - 1] = '\0';
+                r->instr_addr = lda1->pc_at_instruction;
+                r->target_addr = lda1->operand;
+                
+                if (lda1->expression[0] != '\0') {
+                    snprintf(r->old_code, sizeof(r->old_code), "LDA %s; SBC #1; STA %s; LDA %s+1; SBC #0; STA %s+1", 
+                            lda1->expression, lda1->expression, lda1->expression, lda1->expression);
+                    snprintf(r->new_code, sizeof(r->new_code), "DEW %s", lda1->expression);
+                } else {
+                    snprintf(r->old_code, sizeof(r->old_code), "LDA $%02X; SBC #1; STA $%02X; LDA $%02X; SBC #0; STA $%02X", 
+                            lda1->operand, sta1->operand, lda2->operand, sta2->operand);
+                    snprintf(r->new_code, sizeof(r->new_code), "DEW $%02X", lda1->operand);
+                }
+                
+                /* LDA (2) + SBC # (2) + STA (2) + LDA (2) + SBC # (2) + STA (2) = 12 bytes -> DEW (3 bytes), saves 9 bytes */
+                r->bytes_saved = 9;
+                replacement_count++;
+            }
+        }
+    }
+
+    /* Check for NEG A pattern: EOR #$FF; INC A -> negate accumulator (two's complement) */
+    if (opcode == 0x1A && instr_history_count >= 2) {  /* INC A */
+        instr_history_t *inca = &instr_history[instr_history_count - 1];  /* Current INC A */
+        instr_history_t *eor = &instr_history[instr_history_count - 2];   /* Previous EOR #$FF */
+        
+        /* Check pattern: EOR #$FF; INC A */
+        if (eor->opcode == 0x49 && eor->operand == 0xFF && inca->opcode == 0x1A) {
+            if (replacement_count < MAX_REPLACEMENTS) {
+                replacement_t *r = &replacements[replacement_count];
+                strcpy(r->type, "NEG_A");
+                r->line_num = eor->line_num;
+                strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                r->filename[sizeof(r->filename) - 1] = '\0';
+                r->instr_addr = eor->pc_at_instruction;
+                r->target_addr = 0;  /* No address target */
+                
+                /* Build old/new code strings */
+                strcpy(r->old_code, "EOR #$FF; INC A");
+                strcpy(r->new_code, "NEG A (accumulator negate)");
+                
+                /* EOR #$FF + INC A = 4 bytes (2+2), documented optimization opportunity */
+                r->bytes_saved = 0;  /* No actual savings, but documents the pattern */
+                replacement_count++;
+            }
+        }
+    }
+
+    /* Check for NEG (memory) pattern: LDA addr; EOR #$FF; ADC #1; STA addr -> NEG addr */
+    if (opcode == 0x85 && instr_history_count >= 4) {  /* STA zp */
+        instr_history_t *sta = &instr_history[instr_history_count - 1];    /* Current STA */
+        instr_history_t *adc = &instr_history[instr_history_count - 2];    /* ADC #1 */
+        instr_history_t *eor = &instr_history[instr_history_count - 3];    /* EOR #$FF */
+        instr_history_t *lda = &instr_history[instr_history_count - 4];    /* LDA addr */
+        
+        /* Check pattern: LDA zp; EOR #$FF; ADC #1; STA zp (same address) */
+        if ((lda->opcode == 0xA5 || lda->opcode == 0xAD) &&  /* LDA zp or abs */
+            eor->opcode == 0x49 && eor->operand == 0xFF &&    /* EOR #$FF */
+            adc->opcode == 0x69 && adc->operand == 0x01 &&    /* ADC #1 */
+            (sta->opcode == 0x85 || sta->opcode == 0x8D) &&   /* STA zp or abs */
+            lda->operand == sta->operand) {  /* Same address */
+            
+            if (replacement_count < MAX_REPLACEMENTS) {
+                replacement_t *r = &replacements[replacement_count];
+                strcpy(r->type, "NEG_MEM");
+                r->line_num = lda->line_num;
+                strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                r->filename[sizeof(r->filename) - 1] = '\0';
+                r->instr_addr = lda->pc_at_instruction;
+                r->target_addr = lda->operand;
+                
+                /* Build old/new code strings */
+                if (lda->expression[0] != '\0') {
+                    snprintf(r->old_code, sizeof(r->old_code), "LDA %s; EOR #$FF; ADC #1; STA %s", 
+                            lda->expression, lda->expression);
+                    snprintf(r->new_code, sizeof(r->new_code), "NEG %s", lda->expression);
+                } else {
+                    snprintf(r->old_code, sizeof(r->old_code), "LDA $%04X; EOR #$FF; ADC #1; STA $%04X", 
+                            lda->operand, sta->operand);
+                    snprintf(r->new_code, sizeof(r->new_code), "NEG $%04X", lda->operand);
+                }
+                
+                /* LDA + EOR + ADC + STA = 8 bytes -> NEG = would be 3 bytes, saves 5 bytes */
+                r->bytes_saved = 5;
+                replacement_count++;
+            }
+        }
+    }
+
+    /* Check for ASR pattern: CMP #$80; LSR; BCC +3; ORA #$80 -> arithmetic shift right */
+    if (opcode == 0x09 && instr_history_count >= 4) {  /* ORA (either #, $00, abs, etc) */
+        instr_history_t *ora = &instr_history[instr_history_count - 1];     /* Current ORA */
+        instr_history_t *bcc = &instr_history[instr_history_count - 2];     /* BCC +3 */
+        instr_history_t *lsr = &instr_history[instr_history_count - 3];     /* LSR */
+        instr_history_t *cmp = &instr_history[instr_history_count - 4];     /* CMP #$80 */
+        
+        /* Check pattern: CMP #$80; LSR; BCC +3; ORA #$80 */
+        if (cmp->opcode == 0xC9 && cmp->operand == 0x80 &&   /* CMP #$80 */
+            lsr->opcode == 0x4A &&                             /* LSR A */
+            (bcc->opcode == 0x90) &&                           /* BCC (forward branch) */
+            ora->opcode == 0x09 && ora->operand == 0x80) {     /* ORA #$80 */
+            
+            if (replacement_count < MAX_REPLACEMENTS) {
+                replacement_t *r = &replacements[replacement_count];
+                strcpy(r->type, "ASR");
+                r->line_num = cmp->line_num;
+                strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                r->filename[sizeof(r->filename) - 1] = '\0';
+                r->instr_addr = cmp->pc_at_instruction;
+                r->target_addr = 0;  /* No address target */
+                
+                /* Build old/new code strings */
+                strcpy(r->old_code, "CMP #$80; LSR; BCC +3; ORA #$80");
+                strcpy(r->new_code, "ASR A (arithmetic shift right)");
+                
+                /* This sequence = 8 bytes -> ASR would be single byte, saves 7 bytes */
+                r->bytes_saved = 7;
+                replacement_count++;
+            }
+        }
+    }
+
+    /* Check for 16-bit branch pattern: (branch condition); JMP addr16 */
+    if (opcode == 0x4C && instr_history_count >= 2) {  /* JMP abs */
+        instr_history_t *jmp = &instr_history[instr_history_count - 1];    /* Current JMP */
+        instr_history_t *branch = &instr_history[instr_history_count - 2]; /* Previous branch */
+        
+        /* Check if previous instruction was a conditional branch (not unconditional BRA) */
+        uint8_t branch_opcodes[] = {0x10, 0x30, 0x50, 0x70, 0x90, 0xB0, 0xD0, 0xF0};  /* BPL, BMI, BVC, BVS, BCC, BCS, BNE, BEQ */
+        int is_branch = 0;
+        for (int i = 0; i < 8; i++) {
+            if (branch->opcode == branch_opcodes[i]) {
+                is_branch = 1;
+                break;
+            }
+        }
+        
+        /* Pattern: conditional branch followed by JMP (workaround for 8-bit branch limit) */
+        if (is_branch && replacement_count < MAX_REPLACEMENTS) {
+            replacement_t *r = &replacements[replacement_count];
+            strcpy(r->type, "BRANCH_16BIT");
+            r->line_num = branch->line_num;
+            strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+            r->filename[sizeof(r->filename) - 1] = '\0';
+            r->instr_addr = branch->pc_at_instruction;
+            r->target_addr = jmp->operand;
+            
+            /* Map branch opcode to name */
+            const char *branch_name = "branch";
+            switch (branch->opcode) {
+                case 0x10: branch_name = "BPL"; break;
+                case 0x30: branch_name = "BMI"; break;
+                case 0x50: branch_name = "BVC"; break;
+                case 0x70: branch_name = "BVS"; break;
+                case 0x90: branch_name = "BCC"; break;
+                case 0xB0: branch_name = "BCS"; break;
+                case 0xD0: branch_name = "BNE"; break;
+                case 0xF0: branch_name = "BEQ"; break;
+            }
+            
+            snprintf(r->old_code, sizeof(r->old_code), "%s +3; JMP $%04X", branch_name, jmp->operand);
+            snprintf(r->new_code, sizeof(r->new_code), "%s $%04X (16-bit branch)", branch_name, jmp->operand);
+            
+            /* branch + JMP = 5 bytes -> 16-bit branch would be 3 bytes, saves 2 bytes */
+            r->bytes_saved = 2;
+            replacement_count++;
+        }
+    }
+
+    /* Check for PHW pattern: LDA addr+1; PHA; LDA addr; PHA -> PHW addr */
+    if (opcode == 0x48 && instr_history_count >= 4) {  /* PHA */
+        instr_history_t *pha2 = &instr_history[instr_history_count - 1];  /* Current PHA */
+        instr_history_t *lda2 = &instr_history[instr_history_count - 2];  /* Second LDA (low byte) */
+        instr_history_t *pha1 = &instr_history[instr_history_count - 3];  /* First PHA */
+        instr_history_t *lda1 = &instr_history[instr_history_count - 4];  /* First LDA (high byte) */
+        
+        /* Check pattern: LDA addr+1; PHA; LDA addr; PHA */
+        if ((lda1->opcode == 0xA5 || lda1->opcode == 0xAD) &&  /* LDA zp or LDA abs */
+            pha1->opcode == 0x48 &&  /* PHA */
+            (lda2->opcode == 0xA5 || lda2->opcode == 0xAD) &&  /* LDA zp or LDA abs */
+            pha2->opcode == 0x48) {  /* PHA */
+            /* Check if operands are consecutive: lda1 should be lda2 + 1 */
+            if (lda1->operand == lda2->operand + 1) {
+                if (replacement_count < MAX_REPLACEMENTS) {
+                    replacement_t *r = &replacements[replacement_count];
+                    strcpy(r->type, "PHW");
+                    r->line_num = lda1->line_num;
+                    strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                    r->filename[sizeof(r->filename) - 1] = '\0';
+                    r->instr_addr = lda1->pc_at_instruction;
+                    r->target_addr = lda2->operand;  /* Base address (low byte address) */
+                    
+                    /* Build old code string */
+                    if (lda1->expression[0] != '\0') {
+                        snprintf(r->old_code, sizeof(r->old_code), "LDA %s+1; PHA; LDA %s; PHA", 
+                                lda1->expression, lda1->expression);
+                        snprintf(r->new_code, sizeof(r->new_code), "PHW %s", lda1->expression);
+                    } else {
+                        snprintf(r->old_code, sizeof(r->old_code), "LDA $%04X; PHA; LDA $%04X; PHA", 
+                                lda1->operand, lda2->operand);
+                        snprintf(r->new_code, sizeof(r->new_code), "PHW $%04X", lda2->operand);
+                    }
+                    
+                    /* LDA+PHA+LDA+PHA = 5 bytes -> PHW = 3 bytes, saves 2 bytes */
+                    r->bytes_saved = 2;
+                    replacement_count++;
+                }
+            }
+        }
+    }
+
+    /* Check for return with pop patterns that can use RTN in 65CE02 */
+    if (opcode == 0x60) {  /* RTS */
+        /* Pattern: One or more PLA/PLX/PLY followed by RTS -> RTN (combine into single instruction) */
+        /* Note: RTS has already been added to history, so -2 is the instruction before RTS */
+        
+        /* Count consecutive pop instructions before RTS */
+        int pop_count = 0;
+        int history_idx = instr_history_count - 2;  /* Start at instruction before RTS */
+        
+        /* Look back for consecutive pop instructions */
+        while (history_idx >= 0) {
+            instr_history_t *instr = &instr_history[history_idx];
+            if (instr->opcode == 0x68 || instr->opcode == 0xFA || instr->opcode == 0x7A) {  /* PLA, PLX, PLY */
+                pop_count++;
+                history_idx--;
+            } else {
+                break;  /* Stop at first non-pop instruction */
+            }
+        }
+        
+        /* If we found at least one pop before RTS, record as replacement opportunity */
+        if (pop_count > 0 && replacement_count < MAX_REPLACEMENTS) {
+            replacement_t *r = &replacements[replacement_count];
+            strcpy(r->type, "RETURN_POP");
+            
+            /* First pop instruction's line number */
+            instr_history_t *first_pop = &instr_history[instr_history_count - 2 - pop_count + 1];
+            r->line_num = first_pop->line_num;
+            strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+            r->filename[sizeof(r->filename) - 1] = '\0';
+            r->instr_addr = first_pop->pc_at_instruction;
+            
+            /* Build old code string with all pops */
+            char old_code_buf[256] = "";
+            for (int i = pop_count - 1; i >= 0; i--) {
+                instr_history_t *pop_instr = &instr_history[instr_history_count - 2 - i];
+                const char *pop_name = pop_instr->instr_name[0] != '\0' ? pop_instr->instr_name : 
+                                      (pop_instr->opcode == 0x68 ? "PLA" : 
+                                       (pop_instr->opcode == 0xFA ? "PLX" : "PLY"));
+                if (i == pop_count - 1) {
+                    snprintf(old_code_buf, sizeof(old_code_buf), "%s", pop_name);
+                } else {
+                    strncat(old_code_buf, "; ", sizeof(old_code_buf) - strlen(old_code_buf) - 1);
+                    strncat(old_code_buf, pop_name, sizeof(old_code_buf) - strlen(old_code_buf) - 1);
+                }
+            }
+            strncat(old_code_buf, "; RTS", sizeof(old_code_buf) - strlen(old_code_buf) - 1);
+            strncpy(r->old_code, old_code_buf, sizeof(r->old_code) - 1);
+            r->old_code[sizeof(r->old_code) - 1] = '\0';
+            
+            snprintf(r->new_code, sizeof(r->new_code), "RTN (65CE02)");
+            
+            /* pop_count pops (1 each) + RTS (1) = pop_count + 1 bytes -> RTN (1 byte), saves pop_count bytes */
+            r->bytes_saved = pop_count;
+            replacement_count++;
+        }
+    }
+    
+    /* Check for 16-bit shift/rotate patterns that can use ASW/ROW in 65CE02 */
+    /* Pattern 1: ROL zp / ASL zp+1 -> ROW (rotate word - left) */
+    if (opcode == 0x06 || opcode == 0x0E || opcode == 0x16 || opcode == 0x1E || opcode == 0x0A) {  /* ASL variants */
+        if (instr_history_count >= 2) {
+            instr_history_t *asl_instr = &instr_history[instr_history_count - 1];
+            instr_history_t *prev_instr = &instr_history[instr_history_count - 2];
+            
+            /* Check if this is ASL and previous is ROL, and operands are consecutive */
+            if ((prev_instr->opcode == 0x2A || prev_instr->opcode == 0x26 || 
+                 prev_instr->opcode == 0x2E || prev_instr->opcode == 0x36 || 
+                 prev_instr->opcode == 0x3E) &&  /* ROL variants: A, zp, abs, zp,X, abs,X */
+                (asl_instr->opcode == 0x0A || asl_instr->opcode == 0x06 || 
+                 asl_instr->opcode == 0x0E || asl_instr->opcode == 0x16 || 
+                 asl_instr->opcode == 0x1E)) {  /* ASL variants: A, zp, abs, zp,X, abs,X */
+                /* Check if operands are consecutive (high/low bytes of same address) */
+                if (prev_instr->operand + 1 == asl_instr->operand) {
+                    if (replacement_count < MAX_REPLACEMENTS) {
+                        replacement_t *r = &replacements[replacement_count];
+                        strcpy(r->type, "SHIFT_16BIT");
+                        r->line_num = prev_instr->line_num;
+                        strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                        r->filename[sizeof(r->filename) - 1] = '\0';
+                        r->instr_addr = prev_instr->pc_at_instruction;
+                        r->target_addr = prev_instr->operand;  /* Base address of 16-bit value */
+                        
+                        /* Build old code - detected as ROL/ASL on consecutive addresses */
+                        if (prev_instr->expression[0] != '\0') {
+                            snprintf(r->old_code, sizeof(r->old_code), "ROL %s; ASL %s+1", 
+                                    prev_instr->expression, prev_instr->expression);
+                            snprintf(r->new_code, sizeof(r->new_code), "ROW %s", prev_instr->expression);
+                        } else {
+                            snprintf(r->old_code, sizeof(r->old_code), "ROL $%04X; ASL $%04X", 
+                                    prev_instr->operand, asl_instr->operand);
+                            snprintf(r->new_code, sizeof(r->new_code), "ROW $%04X", prev_instr->operand);
+                        }
+                        
+                        /* ROL (3) + ASL (3) = 6 bytes -> ROW (3 bytes), saves 3 bytes */
+                        r->bytes_saved = 3;
+                        replacement_count++;
+                    }
+                }
+            }
+        }
+    }
+    
+    /* Pattern 2: LSR zp / ROR zp+1 -> ASW (arithmetic shift word - right) */
+    if (opcode == 0x66 || opcode == 0x6E || opcode == 0x76 || opcode == 0x7E || opcode == 0x6A) {  /* ROR variants */
+        if (instr_history_count >= 2) {
+            instr_history_t *ror_instr = &instr_history[instr_history_count - 1];
+            instr_history_t *prev_instr = &instr_history[instr_history_count - 2];
+            
+            /* Check if this is ROR and previous is LSR, and operands are consecutive */
+            if ((prev_instr->opcode == 0x4A || prev_instr->opcode == 0x46 || 
+                 prev_instr->opcode == 0x4E || prev_instr->opcode == 0x56 || 
+                 prev_instr->opcode == 0x5E) &&  /* LSR variants: A, zp, abs, zp,X, abs,X */
+                (ror_instr->opcode == 0x6A || ror_instr->opcode == 0x66 || 
+                 ror_instr->opcode == 0x6E || ror_instr->opcode == 0x76 || 
+                 ror_instr->opcode == 0x7E)) {  /* ROR variants: A, zp, abs, zp,X, abs,X */
+                /* Check if operands are consecutive (high/low bytes of same address) */
+                if (prev_instr->operand + 1 == ror_instr->operand) {
+                    if (replacement_count < MAX_REPLACEMENTS) {
+                        replacement_t *r = &replacements[replacement_count];
+                        strcpy(r->type, "SHIFT_16BIT");
+                        r->line_num = prev_instr->line_num;
+                        strncpy(r->filename, filename ? filename : "unknown", sizeof(r->filename) - 1);
+                        r->filename[sizeof(r->filename) - 1] = '\0';
+                        r->instr_addr = prev_instr->pc_at_instruction;
+                        r->target_addr = prev_instr->operand;  /* Base address of 16-bit value */
+                        
+                        /* Build old code - detected as LSR/ROR on consecutive addresses */
+                        if (prev_instr->expression[0] != '\0') {
+                            snprintf(r->old_code, sizeof(r->old_code), "LSR %s; ROR %s+1", 
+                                    prev_instr->expression, prev_instr->expression);
+                            snprintf(r->new_code, sizeof(r->new_code), "ASW %s", prev_instr->expression);
+                        } else {
+                            snprintf(r->old_code, sizeof(r->old_code), "LSR $%04X; ROR $%04X", 
+                                    prev_instr->operand, ror_instr->operand);
+                            snprintf(r->new_code, sizeof(r->new_code), "ASW $%04X", prev_instr->operand);
+                        }
+                        
+                        /* LSR (3) + ROR (3) = 6 bytes -> ASW (3 bytes), saves 3 bytes */
+                        r->bytes_saved = 3;
+                        replacement_count++;
+                    }
+                }
             }
         }
     }
@@ -1272,55 +1745,55 @@ static void print_assembler_statistics(void) {
     printf("===========================\n");
 }
 
-void stats_print_report(void) {
+static void print_binary_statistics(int include_data_labels) {
     extern uint16_t min_address;
     extern uint16_t max_address;
     extern uint16_t min_opcode_address;
     extern uint16_t max_opcode_address;
     extern uint16_t org_address;
-    
-    print_assembler_statistics();
-    
+
+    int opcode_region_size = 0;
+    if (min_opcode_address != 0xFFFF && max_opcode_address != 0) {
+        opcode_region_size = max_opcode_address - min_opcode_address + 1;
+    }
+
     printf("\n=== Binary Statistics ===\n");
-    printf("Total bytes in binary: %d\n", binary_size);
-    if (min_address != 0xFFFF && max_address != 0) {
-        printf("Lowest emitted address: $%04X\n", min_address);
-        printf("Highest emitted address: $%04X\n", max_address);
-    } else if (binary_size > 0) {
-        /* Fallback to org_address if min/max not set */
-        printf("Lowest emitted address: $%04X\n", org_address);
-        printf("Highest emitted address): $%04X\n", org_address + binary_size - 1);
+    if (opcode_region_size > 0) {
+        printf("Total bytes in binary (opcode region): %d\n", opcode_region_size);
+    } else {
+        printf("Total bytes in binary: %d\n", binary_size);
     }
     if (min_opcode_address != 0xFFFF && max_opcode_address != 0) {
         printf("Lowest opcode address: $%04X\n", min_opcode_address);
         printf("Highest opcode address: $%04X\n", max_opcode_address);
     }
-    printf("========================\n");
-    
-    printf("\n=== Opcode Statistics ===\n");
-    printf("Total opcodes emitted: %d\n", total_opcodes);
-    printf("Total opcodes bytes emitted: %d\n\n", total_opcode_bytes);
-    
-    /* Collect opcodes with counts > 0 and sort by mnemonic */
-    typedef struct {
-        uint8_t opcode;
-        int count;
-        const char *name;
-    } opcode_entry_t;
-    
-    opcode_entry_t entries[256];
-    int entry_count = 0;
-    
-    for (int i = 0; i < NUM_OPCODES; i++) {
-        if (opcode_counts[i] > 0) {
-            entries[entry_count].opcode = i;
-            entries[entry_count].count = opcode_counts[i];
-            entries[entry_count].name = opcode_names[i];
-            entry_count++;
+   if (min_address != 0xFFFF && max_address != 0) {
+        if (include_data_labels) {
+            printf("Lowest emitted address (includes data bytes): $%04X\n", min_address);
+            printf("Highest emitted address (includes data bytes): $%04X\n", max_address);
+        } else {
+            printf("Lowest emitted address: $%04X\n", min_address);
+            printf("Highest emitted address: $%04X\n", max_address);
+        }
+    } else if (binary_size > 0) {
+        if (include_data_labels) {
+            printf("Lowest emitted address (includes data bytes): $%04X\n", org_address);
+            printf("Highest emitted address (includes data bytes): $%04X\n", org_address + binary_size - 1);
+        } else {
+            printf("Lowest emitted address: $%04X\n", org_address);
+            printf("Highest emitted address: $%04X\n", org_address + binary_size - 1);
         }
     }
-    
-    /* Sort by mnemonic name */
+     printf("========================\n");
+}
+
+typedef struct {
+    uint8_t opcode;
+    int count;
+    const char *name;
+} opcode_entry_t;
+
+static void sort_opcode_entries(opcode_entry_t *entries, int entry_count) {
     for (int i = 0; i < entry_count - 1; i++) {
         for (int j = i + 1; j < entry_count; j++) {
             const char *name_i = entries[i].name ? entries[i].name : "unknown";
@@ -1332,8 +1805,27 @@ void stats_print_report(void) {
             }
         }
     }
-    
-    /* Print sorted entries */
+}
+
+static void print_opcode_statistics(void) {
+    opcode_entry_t entries[256];
+    int entry_count = 0;
+
+    printf("\n=== Opcode Statistics ===\n");
+    printf("Total opcodes emitted: %d\n", total_opcodes);
+    printf("Total opcodes bytes emitted: %d\n\n", total_opcode_bytes);
+
+    for (int i = 0; i < NUM_OPCODES; i++) {
+        if (opcode_counts[i] > 0) {
+            entries[entry_count].opcode = i;
+            entries[entry_count].count = opcode_counts[i];
+            entries[entry_count].name = opcode_names[i];
+            entry_count++;
+        }
+    }
+
+    sort_opcode_entries(entries, entry_count);
+
     if (entry_count > 0) {
         for (int i = 0; i < entry_count; i++) {
             if (entries[i].name) {
@@ -1345,533 +1837,353 @@ void stats_print_report(void) {
     } else {
         printf("No opcodes were emitted.\n");
     }
-    
-    /* Separate 65C02 statistics */
-    int c02_found = 0;
+
     if (c02_opcode_count > 0) {
+        opcode_entry_t c02_entries[256];
+        int c02_entry_count = 0;
+
         printf("\n=== 65C02 Opcode Statistics ===\n");
         printf("Total 65C02 opcodes: %d\n\n", c02_opcode_count);
-        
+
         for (int i = 0; i < NUM_OPCODES; i++) {
             if (opcode_counts[i] > 0 && stats_is_c02_opcode(i)) {
-                c02_found = 1;
-                const char *name = opcode_names[i];
-                if (name) {
-                    printf("$%02X (%s): %d\n", i, name, opcode_counts[i]);
-                } else {
-                    printf("$%02X (unknown C02): %d\n", i, opcode_counts[i]);
-                }
+                c02_entries[c02_entry_count].opcode = i;
+                c02_entries[c02_entry_count].count = opcode_counts[i];
+                c02_entries[c02_entry_count].name = opcode_names[i];
+                c02_entry_count++;
             }
         }
-        
-        if (!c02_found) {
+
+        sort_opcode_entries(c02_entries, c02_entry_count);
+
+        if (c02_entry_count > 0) {
+            for (int i = 0; i < c02_entry_count; i++) {
+                if (c02_entries[i].name) {
+                    printf("$%02X (%s): %d\n", c02_entries[i].opcode, c02_entries[i].name, c02_entries[i].count);
+                } else {
+                    printf("$%02X (unknown C02): %d\n", c02_entries[i].opcode, c02_entries[i].count);
+                }
+            }
+        } else {
             printf("No 65C02 opcodes were emitted.\n");
         }
         printf("==============================\n");
     }
-    
+
     printf("========================\n");
-    
-    /* Print optimization summary (counts only, no details) */
-    if (optimization_count > 0) {
-        int total_bytes_saved = 0;
-        for (int i = 0; i < optimization_count; i++) {
-            total_bytes_saved += optimizations[i].bytes_saved;
-        }
-        
-        printf("\n=== Code Optimization Summary ===\n");
-        printf("Total possible optimizations: %d\n", optimization_count);
-        printf("Total bytes saved: %d", total_bytes_saved);
-        if (total_opcode_bytes > 0) {
-            double percent = (double)total_bytes_saved * 100.0 / (double)total_opcode_bytes;
-            printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
-        }
-        printf("\n");
-        
-        /* Group by type */
-        int inc_count = 0, dec_count = 0;
-        int tax_count = 0, tay_count = 0, branch_jmp_count = 0;
-        int redundant_count = 0, register_count = 0, load_store_count = 0;
-        for (int i = 0; i < optimization_count; i++) {
-            replacement_t *r = &optimizations[i];
-            if (strcmp(r->type, "INC") == 0) inc_count++;
-            else if (strcmp(r->type, "DEC") == 0) dec_count++;
-            else if (strcmp(r->type, "TAX") == 0) tax_count++;
-            else if (strcmp(r->type, "TAY") == 0) tay_count++;
-            else if (strcmp(r->type, "Branch+JMP") == 0) branch_jmp_count++;
-            else if (strcmp(r->type, "Redundant") == 0) redundant_count++;
-            else if (strcmp(r->type, "Register") == 0) register_count++;
-            else if (strcmp(r->type, "Load/Store") == 0) load_store_count++;
-        }
-        
-        if (inc_count > 0) printf("  INC optimizations: %d (LDA/ADC #1/STA -> INC addr)\n", inc_count);
-        if (dec_count > 0) printf("  DEC optimizations: %d (LDA/SBC #1/STA -> DEC addr)\n", dec_count);
-        if (tax_count > 0) printf("  TAX optimizations: %d (LDA #/LDX # -> LDA #/TAX)\n", tax_count);
-        if (tay_count > 0) printf("  TAY optimizations: %d (LDA #/LDY # -> LDA #/TAY)\n", tay_count);
-        if (branch_jmp_count > 0) printf("  Branch+JMP optimizations: %d\n", branch_jmp_count);
-        if (redundant_count > 0) printf("  Redundant instruction removals: %d\n", redundant_count);
-        if (register_count > 0) printf("  Register transfer optimizations: %d\n", register_count);
-        if (load_store_count > 0) printf("  Load/Store optimizations: %d\n", load_store_count);
-        
-        printf("===================================\n");
+}
+
+static void print_code_optimization_summary(void) {
+    if (optimization_count == 0) {
+        return;
     }
-    
-        /* Print immediate zero statistics */
-        if (total_immediate_zero > 0 || sta_zero_count > 0) {
-            printf("\n=== Immediate Zero Opcodes ===\n");
-            printf("Total immediate zero opcodes: %d", total_immediate_zero);
-            if (sta_zero_count > 0) {
-                printf(" (plus %d STA $00)", sta_zero_count);
-            }
-            printf("\n");
-            
-            /* Calculate potential savings if LDA #0, LDX #0, LDY #0 were single-byte */
-            int lda_zero_count = immediate_zero_counts[0xA9];  /* LDA #0 */
-            int ldx_zero_count = immediate_zero_counts[0xA2];  /* LDX #0 */
-            int ldy_zero_count = immediate_zero_counts[0xA0];  /* LDY #0 */
-            int total_single_byte_savings = lda_zero_count + ldx_zero_count + ldy_zero_count;
-            if (total_single_byte_savings > 0) {
-                printf("Potential savings of LZA/LZX/LZY: %d bytes", total_single_byte_savings);
-                if (total_opcode_bytes > 0) {
-                    double percent = (double)total_single_byte_savings * 100.0 / (double)total_opcode_bytes;
-                    printf(" (%.1f%% of total opcode bytes)", percent);
-                }
-                printf("\n");
-            }
-            printf("\n");
-            
-            /* Collect immediate zero opcodes with counts > 0 and sort by mnemonic */
-            opcode_entry_t zero_entries[256];
-            int zero_entry_count = 0;
-            
-            for (int i = 0; i < NUM_OPCODES; i++) {
-                if (immediate_zero_counts[i] > 0) {
-                    zero_entries[zero_entry_count].opcode = i;
-                    zero_entries[zero_entry_count].count = immediate_zero_counts[i];
-                    zero_entries[zero_entry_count].name = opcode_names[i];
-                    zero_entry_count++;
-                }
-            }
-            
-            /* Sort by mnemonic name */
-            for (int i = 0; i < zero_entry_count - 1; i++) {
-                for (int j = i + 1; j < zero_entry_count; j++) {
-                    const char *name_i = zero_entries[i].name ? zero_entries[i].name : "unknown";
-                    const char *name_j = zero_entries[j].name ? zero_entries[j].name : "unknown";
-                    if (strcmp(name_i, name_j) > 0) {
-                        opcode_entry_t temp = zero_entries[i];
-                        zero_entries[i] = zero_entries[j];
-                        zero_entries[j] = temp;
-                    }
-                }
-            }
-            
-            /* Print sorted entries */
-            int found_any = 0;
-            if (zero_entry_count > 0) {
-                found_any = 1;
-                for (int i = 0; i < zero_entry_count; i++) {
-                    if (zero_entries[i].name) {
-                        printf("$%02X (%s): %d\n", zero_entries[i].opcode, zero_entries[i].name, zero_entries[i].count);
-                    } else {
-                        printf("$%02X (unknown): %d\n", zero_entries[i].opcode, zero_entries[i].count);
-                    }
-                }
-            }
-            
-            if (sta_zero_count > 0) {
-                found_any = 1;
-                printf("STA $00: %d\n", sta_zero_count);
-            }
-            
-            if (!found_any) {
-                printf("No immediate zero opcodes were emitted.\n");
-            }
-            printf("==============================\n");
+
+    int total_bytes_saved = 0;
+    for (int i = 0; i < optimization_count; i++) {
+        total_bytes_saved += optimizations[i].bytes_saved;
+    }
+
+    printf("\n=== Code Optimization Summary ===\n");
+    printf("Total possible optimizations: %d\n", optimization_count);
+    printf("Total bytes saved: %d", total_bytes_saved);
+    if (total_opcode_bytes > 0) {
+        double percent = (double)total_bytes_saved * 100.0 / (double)total_opcode_bytes;
+        printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
+    }
+    printf("\n");
+
+    int inc_count = 0, dec_count = 0;
+    int tax_count = 0, tay_count = 0, branch_jmp_count = 0;
+    int redundant_count = 0, register_count = 0, load_store_count = 0;
+
+    for (int i = 0; i < optimization_count; i++) {
+        replacement_t *r = &optimizations[i];
+        if (strcmp(r->type, "INC") == 0) inc_count++;
+        else if (strcmp(r->type, "DEC") == 0) dec_count++;
+        else if (strcmp(r->type, "TAX") == 0) tax_count++;
+        else if (strcmp(r->type, "TAY") == 0) tay_count++;
+        else if (strcmp(r->type, "Branch+JMP") == 0) branch_jmp_count++;
+        else if (strcmp(r->type, "Redundant") == 0) redundant_count++;
+        else if (strcmp(r->type, "Register") == 0) register_count++;
+        else if (strcmp(r->type, "Load/Store") == 0) load_store_count++;
+    }
+
+    if (inc_count > 0) printf("  INC optimizations: %d (LDA/ADC #1/STA -> INC addr)\n", inc_count);
+    if (dec_count > 0) printf("  DEC optimizations: %d (LDA/SBC #1/STA -> DEC addr)\n", dec_count);
+    if (tax_count > 0) printf("  TAX optimizations: %d (LDA #/LDX # -> LDA #/TAX)\n", tax_count);
+    if (tay_count > 0) printf("  TAY optimizations: %d (LDA #/LDY # -> LDA #/TAY)\n", tay_count);
+    if (branch_jmp_count > 0) printf("  Branch+JMP optimizations: %d\n", branch_jmp_count);
+    if (redundant_count > 0) printf("  Redundant instruction removals: %d\n", redundant_count);
+    if (register_count > 0) printf("  Register transfer optimizations: %d\n", register_count);
+    if (load_store_count > 0) printf("  Load/Store optimizations: %d\n", load_store_count);
+    printf("===================================\n");
+}
+
+static void print_immediate_zero_statistics(void) {
+    if (total_immediate_zero == 0 && sta_zero_count == 0) {
+        return;
+    }
+
+    printf("\n=== Immediate Zero Opcodes ===\n");
+    printf("Total immediate zero opcodes: %d", total_immediate_zero);
+    if (sta_zero_count > 0) {
+        printf(" (plus %d STA $00)", sta_zero_count);
+    }
+    printf("\n");
+
+    opcode_entry_t zero_entries[256];
+    int zero_entry_count = 0;
+    for (int i = 0; i < NUM_OPCODES; i++) {
+        if (immediate_zero_counts[i] > 0) {
+            zero_entries[zero_entry_count].opcode = i;
+            zero_entries[zero_entry_count].count = immediate_zero_counts[i];
+            zero_entries[zero_entry_count].name = opcode_names[i];
+            zero_entry_count++;
         }
-    
-    /* Print replacement opportunities */
-    if (replacement_count > 0) {
-        int total_bytes_saved = 0;
-        for (int i = 0; i < replacement_count; i++) {
-            total_bytes_saved += replacements[i].bytes_saved;
+    }
+
+    sort_opcode_entries(zero_entries, zero_entry_count);
+
+    int found_any = 0;
+    if (zero_entry_count > 0) {
+        found_any = 1;
+        for (int i = 0; i < zero_entry_count; i++) {
+            if (zero_entries[i].name) {
+                printf("$%02X (%s): %d\n", zero_entries[i].opcode, zero_entries[i].name, zero_entries[i].count);
+            } else {
+                printf("$%02X (unknown): %d\n", zero_entries[i].opcode, zero_entries[i].count);
+            }
         }
-        
-        printf("\n=== 65C02 Replacement Opportunities ===\n");
-        printf("Total possible replacements: %d\n", replacement_count);
-        printf("Total bytes saved: %d", total_bytes_saved);
-        if (total_opcode_bytes > 0) {
-            double percent = (double)total_bytes_saved * 100.0 / (double)total_opcode_bytes;
-            printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
-        }
-        printf("\n");
-        
-        /* Group by type */
-        int stz_count = 0, phx_count = 0, phy_count = 0, plx_count = 0, ply_count = 0, bra_count = 0;
-        int inc_count = 0, dec_count = 0, tsb_count = 0, trb_count = 0, jmp_indx_count = 0, brs_count = 0;
-        
+    }
+
+    if (sta_zero_count > 0) {
+        found_any = 1;
+        printf("STA $00: %d\n", sta_zero_count);
+    }
+
+    if (!found_any) {
+        printf("No immediate zero opcodes were emitted.\n");
+    }
+    printf("==============================\n");
+}
+
+static void print_65CE02_replacement_opportunities(int use_ina_dea, int include_zero_savings, int include_other_improvements) {
+    int lda_zero_count = immediate_zero_counts[0xA9];
+    //int ldx_zero_count = immediate_zero_counts[0xA2];
+    //int ldy_zero_count = immediate_zero_counts[0xA0];
+    int ce02_zero_savings = lda_zero_count;// they don't have TZX or TZY
+
+    if (replacement_count == 0 && !include_zero_savings && !include_other_improvements) {
+        return;
+    }
+
+    printf("\n=== 65C02 Replacement Opportunities ===\n");
+
+    int stz_count = 0, phx_count = 0, phy_count = 0, plx_count = 0, ply_count = 0, bra_count = 0;
+    int inc_count = 0, dec_count = 0, ina_count = 0, dea_count = 0;
+    int tsb_count = 0, trb_count = 0, jmp_indx_count = 0, brs_count = 0, long_branch_count = 0;
+    int return_pop_count = 0, shift_16bit_count = 0, phw_count = 0, inw_count = 0, dew_count = 0;
+    int neg_a_count = 0, neg_mem_count = 0, asr_count = 0, branch_16bit_count = 0;
+
+    for (int i = 0; i < replacement_count; i++) {
+        replacement_t *r = &replacements[i];
+        if (strcmp(r->type, "STZ") == 0) stz_count++;
+        else if (strcmp(r->type, "PHX") == 0) phx_count++;
+        else if (strcmp(r->type, "PHY") == 0) phy_count++;
+        else if (strcmp(r->type, "PLX") == 0) plx_count++;
+        else if (strcmp(r->type, "PLY") == 0) ply_count++;
+        else if (strcmp(r->type, "BRA") == 0) bra_count++;
+        else if (strcmp(r->type, "INC") == 0) inc_count++;
+        else if (strcmp(r->type, "DEC") == 0) dec_count++;
+        else if (strcmp(r->type, "INA") == 0) ina_count++;
+        else if (strcmp(r->type, "DEA") == 0) dea_count++;
+        else if (strcmp(r->type, "TSB") == 0) tsb_count++;
+        else if (strcmp(r->type, "TRB") == 0) trb_count++;
+        else if (strcmp(r->type, "JMP (abs,X)") == 0) jmp_indx_count++;
+        else if (strcmp(r->type, "BRS") == 0) brs_count++;
+        else if (strcmp(r->type, "LONG_BRANCH") == 0) long_branch_count++;
+        else if (strcmp(r->type, "RETURN_POP") == 0) return_pop_count++;
+        else if (strcmp(r->type, "SHIFT_16BIT") == 0) shift_16bit_count++;
+        else if (strcmp(r->type, "PHW") == 0) phw_count++;
+        else if (strcmp(r->type, "INW") == 0) inw_count++;
+        else if (strcmp(r->type, "DEW") == 0) dew_count++;
+        else if (strcmp(r->type, "NEG_A") == 0) neg_a_count++;
+        else if (strcmp(r->type, "NEG_MEM") == 0) neg_mem_count++;
+        else if (strcmp(r->type, "ASR") == 0) asr_count++;
+        else if (strcmp(r->type, "BRANCH_16BIT") == 0) branch_16bit_count++;
+    }
+
+    {
+        int c02_total_count = 0;
+        int c02_total_bytes_saved = 0;
         for (int i = 0; i < replacement_count; i++) {
             replacement_t *r = &replacements[i];
-            if (strcmp(r->type, "STZ") == 0) stz_count++;
-            else if (strcmp(r->type, "PHX") == 0) phx_count++;
-            else if (strcmp(r->type, "PHY") == 0) phy_count++;
-            else if (strcmp(r->type, "PLX") == 0) plx_count++;
-            else if (strcmp(r->type, "PLY") == 0) ply_count++;
-            else if (strcmp(r->type, "BRA") == 0) bra_count++;
-            else if (strcmp(r->type, "INC") == 0) inc_count++;
-            else if (strcmp(r->type, "DEC") == 0) dec_count++;
-            else if (strcmp(r->type, "TSB") == 0) tsb_count++;
-            else if (strcmp(r->type, "TRB") == 0) trb_count++;
-            else if (strcmp(r->type, "JMP (abs,X)") == 0) jmp_indx_count++;
-            else if (strcmp(r->type, "BRS") == 0) brs_count++;
+            if (strcmp(r->type, "STZ") == 0 || strcmp(r->type, "PHX") == 0 || strcmp(r->type, "PHY") == 0 ||
+                strcmp(r->type, "PLX") == 0 || strcmp(r->type, "PLY") == 0 || strcmp(r->type, "BRA") == 0 ||
+                strcmp(r->type, "TSB") == 0 || strcmp(r->type, "TRB") == 0 || strcmp(r->type, "JMP (abs,X)") == 0 ||
+                (use_ina_dea ? (strcmp(r->type, "INA") == 0 || strcmp(r->type, "DEA") == 0)
+                             : (strcmp(r->type, "INC") == 0 || strcmp(r->type, "DEC") == 0))) {
+                c02_total_count++;
+                c02_total_bytes_saved += r->bytes_saved;
+            }
         }
-        
-        if (bra_count > 0) printf("  BRA replacements: %d (from %d JMP instructions)\n", bra_count, total_jmp_count);
-        if (brs_count > 0) printf("  BRS replacements: %d (from %d JSR instructions) (NOTE: BRS opcode does not exist)\n", brs_count, total_jsr_count);
-        if (stz_count > 0) printf("  STZ replacements: %d\n", stz_count);
-        if (phx_count > 0) printf("  PHX replacements: %d\n", phx_count);
-        if (phy_count > 0) printf("  PHY replacements: %d\n", phy_count);
-        if (plx_count > 0) printf("  PLX replacements: %d\n", plx_count);
-        if (ply_count > 0) printf("  PLY replacements: %d\n", ply_count);
+        printf("Total possible replacements: %d\n", c02_total_count);
+        printf("Total bytes saved: %d", c02_total_bytes_saved);
+        if (total_opcode_bytes > 0) {
+            double percent = (double)c02_total_bytes_saved * 100.0 / (double)total_opcode_bytes;
+            printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
+        }
+        printf("\n");
+    }
+
+    if (bra_count > 0) printf("  BRA replacements: %d (from %d JMP instructions)\n", bra_count, total_jmp_count);
+    if (stz_count > 0) printf("  STZ replacements: %d\n", stz_count);
+    if (phx_count > 0) printf("  PHX replacements: %d\n", phx_count);
+    if (phy_count > 0) printf("  PHY replacements: %d\n", phy_count);
+    if (plx_count > 0) printf("  PLX replacements: %d\n", plx_count);
+    if (ply_count > 0) printf("  PLY replacements: %d\n", ply_count);
+    if (use_ina_dea) {
+        if (ina_count > 0) printf("  INA replacements: %d\n", ina_count);
+        if (dea_count > 0) printf("  DEA replacements: %d\n", dea_count);
+    } else {
         if (inc_count > 0) printf("  INC replacements: %d\n", inc_count);
         if (dec_count > 0) printf("  DEC replacements: %d\n", dec_count);
-        if (tsb_count > 0) printf("  TSB replacements: %d\n", tsb_count);
-        if (trb_count > 0) printf("  TRB replacements: %d\n", trb_count);
-        if (jmp_indx_count > 0) printf("  JMP (abs,X) replacements: %d\n", jmp_indx_count);
-        
-        /* Detailed replacements only shown with -s flag */
+    }
+    if (tsb_count > 0) printf("  TSB replacements: %d\n", tsb_count);
+    if (trb_count > 0) printf("  TRB replacements: %d\n", trb_count);
+    if (jmp_indx_count > 0) printf("  JMP (abs,X) replacements: %d\n", jmp_indx_count);
+
+    if (bra_count > 0 || stz_count > 0 || phx_count > 0 || phy_count > 0 || plx_count > 0 || ply_count > 0 ||
+        ((use_ina_dea ? (ina_count || dea_count) : (inc_count || dec_count))) ||
+        tsb_count > 0 || trb_count > 0 || jmp_indx_count > 0) {
+        printf("========================================\n");
+    }
+
+    printf("\n=== 65CE02 Replacement Opportunities ===\n");
+
+    int ce02_total_count = 0;
+    int ce02_total_bytes_saved = 0;
+    for (int i = 0; i < replacement_count; i++) {
+        replacement_t *r = &replacements[i];
+        if (strcmp(r->type, "RETURN_POP") == 0 || strcmp(r->type, "SHIFT_16BIT") == 0 ||
+            strcmp(r->type, "PHW") == 0 || strcmp(r->type, "INW") == 0 || strcmp(r->type, "DEW") == 0 ||
+            strcmp(r->type, "NEG_A") == 0 || strcmp(r->type, "NEG_MEM") == 0 ||
+            strcmp(r->type, "ASR") == 0 || strcmp(r->type, "BRANCH_16BIT") == 0) {
+            ce02_total_count++;
+            ce02_total_bytes_saved += r->bytes_saved;
+        }
+    }
+    if (include_zero_savings) {
+        ce02_total_bytes_saved += ce02_zero_savings;
+    }
+
+    if (ce02_total_count > 0 || (include_zero_savings && ce02_zero_savings > 0)) {
+        printf("Total possible replacements: %d\n", ce02_total_count);
+        printf("Total bytes saved: %d", ce02_total_bytes_saved);
+        if (total_opcode_bytes > 0) {
+            double percent = (double)ce02_total_bytes_saved * 100.0 / (double)total_opcode_bytes;
+            printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
+        }
+        printf("\n");
+    }
+
+    if (brs_count > 0) printf("  BSR replacements: %d (from %d JSR instructions)\n", brs_count, total_jsr_count);
+    if (long_branch_count > 0) printf("  Long branch replacements: %d (branch +3; JMP)\n", long_branch_count);
+    if (branch_16bit_count > 0) printf("  16-bit branches: %d (branch to JMP)\n", branch_16bit_count);
+    if (return_pop_count > 0) printf("  Return with pop (RTN): %d (PLA/PLX/PLY followed by RTS)\n", return_pop_count);
+    if (shift_16bit_count > 0) printf("  16-bit shift/rotate (ASW/ROW): %d (consecutive shift operations on memory)\n", shift_16bit_count);
+    if (phw_count > 0) printf("  Push word (PHW): %d (LDA high; PHA; LDA low; PHA pattern)\n", phw_count);
+    if (inw_count > 0) printf("  Increment word (INW): %d (LDA/ADC/STA 16-bit pattern)\n", inw_count);
+    if (dew_count > 0) printf("  Decrement word (DEW): %d (LDA/SBC/STA 16-bit pattern)\n", dew_count);
+    if (neg_a_count > 0) printf("  Negate accumulator (NEG A): %d (EOR #$FF; INC A pattern)\n", neg_a_count);
+    if (neg_mem_count > 0) printf("  Negate memory (NEG addr): %d (LDA/EOR #$FF/ADC #1/STA pattern)\n", neg_mem_count);
+    if (asr_count > 0) printf("  Arithmetic shift right (ASR): %d (CMP #$80; LSR; BCC +3; ORA #$80 pattern)\n", asr_count);
+
+    int cmp_zero_count = immediate_zero_counts[0xC9];
+    if (cmp_zero_count > 0) printf("  CMP #0 opportunities: %d\n", cmp_zero_count);
+
+    if (include_zero_savings && ce02_zero_savings > 0) {
+        printf("  LDA #0 -> TZA: %d", ce02_zero_savings);
+        if (total_opcode_bytes > 0) {
+            double percent = (double)ce02_zero_savings * 100.0 / (double)total_opcode_bytes;
+            printf(" (%.1f%% of total opcode bytes)", percent);
+        }
+        printf("\n");
+    }
+
+    if (include_other_improvements) {
+        printf("========================================\n");
+        printf("\n=== Other Possible Improvements ===\n");
+        if (lda_zero_count > 0) {
+            printf("\n  LDZ #0 -> TZA: %d\n", lda_zero_count);
+        }
+        if (brs_count > 0) {
+            printf("  BRS replacements: %d (from %d JSR instructions) (NOTE: BRS opcode does not exist)\n", brs_count, total_jsr_count);
+        }
+        printf("========================================\n");
+    } else {
         printf("========================================\n");
     }
 }
 
+static void print_65C02_replacement_suggestions(void) {
+    if (replacement_count == 0) {
+        return;
+    }
+
+    printf("\n=== 65C02 Replacement Suggestions ===\n");
+    for (int i = 0; i < replacement_count; i++) {
+        replacement_t *r = &replacements[i];
+        if (strcmp(r->type, "BRS") == 0) continue;
+        printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
+        if (strcmp(r->type, "BRA") == 0) {
+            int16_t offset = (int16_t)(r->target_addr - (r->instr_addr + 2));
+            printf("    Instruction address: $%04X, Target address: $%04X, Offset: %+d\n",
+                   r->instr_addr, r->target_addr, offset);
+        }
+        printf("    Old: %s\n", r->old_code);
+        printf("    New: %s\n", r->new_code);
+    }
+    printf("======================================\n");
+}
+
+static void print_code_optimization_suggestions(void) {
+    if (optimization_count == 0) {
+        return;
+    }
+
+    printf("\n=== Code Optimization Suggestions ===\n");
+    for (int i = 0; i < optimization_count; i++) {
+        replacement_t *r = &optimizations[i];
+        printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
+        printf("    Old: %s\n", r->old_code);
+        printf("    New: %s\n", r->new_code);
+    }
+    printf("=====================================\n");
+}
+
+void stats_print_report(void) {
+    print_assembler_statistics();
+    print_binary_statistics(0);
+    print_opcode_statistics();
+    print_code_optimization_summary();
+    print_immediate_zero_statistics();
+    print_65CE02_replacement_opportunities(0, 1, 0);
+}
+
 void stats_print_report_custom(int print_stats, int show_suggestions) {
     if (print_stats) {
-        /* Print assembler statistics before binary statistics */
         print_assembler_statistics();
-        
-        /* Print binary statistics */
-        extern uint16_t min_address;
-        extern uint16_t max_address;
-        extern uint16_t min_opcode_address;
-        extern uint16_t max_opcode_address;
-        extern uint16_t org_address;
-        
-        printf("\n=== Binary Statistics ===\n");
-        printf("Total bytes in binary: %d\n", binary_size);
-        if (min_address != 0xFFFF && max_address != 0) {
-            printf("Lowest emitted address (includes data bytes): $%04X\n", min_address);
-            printf("Highest emitted address (includes data bytes): $%04X\n", max_address);
-        } else if (binary_size > 0) {
-            /* Fallback to org_address if min/max not set */
-            printf("Lowest emitted address (includes data bytes): $%04X\n", org_address);
-            printf("Highest emitted address (includes data bytes): $%04X\n", org_address + binary_size - 1);
-        }
-        if (min_opcode_address != 0xFFFF && max_opcode_address != 0) {
-            printf("Lowest opcode address: $%04X\n", min_opcode_address);
-            printf("Highest opcode address: $%04X\n", max_opcode_address);
-        }
-        printf("========================\n");
-        
-        /* Print opcode statistics */
-        printf("\n=== Opcode Statistics ===\n");
-        printf("Total opcodes emitted: %d\n", total_opcodes);
-    printf("Total opcodes bytes emitted: %d\n", total_opcode_bytes);
-        
-        /* Collect opcodes with counts > 0 and sort by mnemonic */
-        typedef struct {
-            uint8_t opcode;
-            int count;
-            const char *name;
-        } opcode_entry_t;
-        
-        opcode_entry_t entries[256];
-        int entry_count = 0;
-        
-        for (int i = 0; i < NUM_OPCODES; i++) {
-            if (opcode_counts[i] > 0) {
-                entries[entry_count].opcode = i;
-                entries[entry_count].count = opcode_counts[i];
-                entries[entry_count].name = opcode_names[i];
-                entry_count++;
-            }
-        }
-        
-        /* Sort by mnemonic name */
-        for (int i = 0; i < entry_count - 1; i++) {
-            for (int j = i + 1; j < entry_count; j++) {
-                const char *name_i = entries[i].name ? entries[i].name : "unknown";
-                const char *name_j = entries[j].name ? entries[j].name : "unknown";
-                if (strcmp(name_i, name_j) > 0) {
-                    opcode_entry_t temp = entries[i];
-                    entries[i] = entries[j];
-                    entries[j] = temp;
-                }
-            }
-        }
-        
-        /* Print sorted entries */
-        if (entry_count > 0) {
-            for (int i = 0; i < entry_count; i++) {
-                if (entries[i].name) {
-                    printf("$%02X (%s): %d\n", entries[i].opcode, entries[i].name, entries[i].count);
-                } else {
-                    printf("$%02X (unknown): %d\n", entries[i].opcode, entries[i].count);
-                }
-            }
-        } else {
-            printf("No opcodes were emitted.\n");
-        }
-        
-        /* Separate 65C02 statistics */
-        if (c02_opcode_count > 0) {
-            printf("\n=== 65C02 Opcode Statistics ===\n");
-            printf("Total 65C02 opcodes: %d\n\n", c02_opcode_count);
-            
-            /* Collect 65C02 opcodes with counts > 0 and sort by mnemonic */
-            opcode_entry_t c02_entries[256];
-            int c02_entry_count = 0;
-            
-            for (int i = 0; i < NUM_OPCODES; i++) {
-                if (opcode_counts[i] > 0 && stats_is_c02_opcode(i)) {
-                    c02_entries[c02_entry_count].opcode = i;
-                    c02_entries[c02_entry_count].count = opcode_counts[i];
-                    c02_entries[c02_entry_count].name = opcode_names[i];
-                    c02_entry_count++;
-                }
-            }
-            
-            /* Sort by mnemonic name */
-            for (int i = 0; i < c02_entry_count - 1; i++) {
-                for (int j = i + 1; j < c02_entry_count; j++) {
-                    const char *name_i = c02_entries[i].name ? c02_entries[i].name : "unknown C02";
-                    const char *name_j = c02_entries[j].name ? c02_entries[j].name : "unknown C02";
-                    if (strcmp(name_i, name_j) > 0) {
-                        opcode_entry_t temp = c02_entries[i];
-                        c02_entries[i] = c02_entries[j];
-                        c02_entries[j] = temp;
-                    }
-                }
-            }
-            
-            /* Print sorted entries */
-            if (c02_entry_count > 0) {
-                for (int i = 0; i < c02_entry_count; i++) {
-                    if (c02_entries[i].name) {
-                        printf("$%02X (%s): %d\n", c02_entries[i].opcode, c02_entries[i].name, c02_entries[i].count);
-                    } else {
-                        printf("$%02X (unknown C02): %d\n", c02_entries[i].opcode, c02_entries[i].count);
-                    }
-                }
-            } else {
-                printf("No 65C02 opcodes were emitted.\n");
-            }
-            printf("==============================\n");
-        }
-        
-        printf("========================\n");
-        
-        /* Print immediate zero statistics */
-        if (total_immediate_zero > 0 || sta_zero_count > 0) {
-            printf("\n=== Immediate Zero Opcodes ===\n");
-            printf("Total immediate zero opcodes: %d", total_immediate_zero);
-            if (sta_zero_count > 0) {
-                printf(" (plus %d STA $00)", sta_zero_count);
-            }
-            printf("\n");
-            
-            /* Calculate potential savings if LDA #0, LDX #0, LDY #0 were single-byte */
-            int lda_zero_count = immediate_zero_counts[0xA9];  /* LDA #0 */
-            int ldx_zero_count = immediate_zero_counts[0xA2];  /* LDX #0 */
-            int ldy_zero_count = immediate_zero_counts[0xA0];  /* LDY #0 */
-            int total_single_byte_savings = lda_zero_count + ldx_zero_count + ldy_zero_count;
-            if (total_single_byte_savings > 0) {
-                printf("Potential savings (LDA/LDX/LDY #0 -> single-byte): %d bytes", total_single_byte_savings);
-                if (total_opcode_bytes > 0) {
-                    double percent = (double)total_single_byte_savings * 100.0 / (double)total_opcode_bytes;
-                    printf(" (%.1f%% of total opcode bytes)", percent);
-                }
-                printf("\n");
-            }
-            printf("\n");
-            
-            /* Collect immediate zero opcodes with counts > 0 and sort by mnemonic */
-            opcode_entry_t zero_entries[256];
-            int zero_entry_count = 0;
-            
-            for (int i = 0; i < NUM_OPCODES; i++) {
-                if (immediate_zero_counts[i] > 0) {
-                    zero_entries[zero_entry_count].opcode = i;
-                    zero_entries[zero_entry_count].count = immediate_zero_counts[i];
-                    zero_entries[zero_entry_count].name = opcode_names[i];
-                    zero_entry_count++;
-                }
-            }
-            
-            /* Sort by mnemonic name */
-            for (int i = 0; i < zero_entry_count - 1; i++) {
-                for (int j = i + 1; j < zero_entry_count; j++) {
-                    const char *name_i = zero_entries[i].name ? zero_entries[i].name : "unknown";
-                    const char *name_j = zero_entries[j].name ? zero_entries[j].name : "unknown";
-                    if (strcmp(name_i, name_j) > 0) {
-                        opcode_entry_t temp = zero_entries[i];
-                        zero_entries[i] = zero_entries[j];
-                        zero_entries[j] = temp;
-                    }
-                }
-            }
-            
-            /* Print sorted entries */
-            int found_any = 0;
-            if (zero_entry_count > 0) {
-                found_any = 1;
-                for (int i = 0; i < zero_entry_count; i++) {
-                    if (zero_entries[i].name) {
-                        printf("$%02X (%s): %d\n", zero_entries[i].opcode, zero_entries[i].name, zero_entries[i].count);
-                    } else {
-                        printf("$%02X (unknown): %d\n", zero_entries[i].opcode, zero_entries[i].count);
-                    }
-                }
-            }
-            
-            if (sta_zero_count > 0) {
-                found_any = 1;
-                printf("STA $00: %d\n", sta_zero_count);
-            }
-            
-            if (!found_any) {
-                printf("No immediate zero opcodes were emitted.\n");
-            }
-            printf("==============================\n");
-        }
-        
-        /* Print replacement count summary */
-        if (replacement_count > 0) {
-            int total_bytes_saved = 0;
-            for (int i = 0; i < replacement_count; i++) {
-                total_bytes_saved += replacements[i].bytes_saved;
-            }
-            
-            printf("\n=== 65C02 Replacement Opportunities ===\n");
-            printf("Total possible replacements: %d\n", replacement_count);
-            printf("Total bytes saved: %d", total_bytes_saved);
-            if (total_opcode_bytes > 0) {
-                double percent = (double)total_bytes_saved * 100.0 / (double)total_opcode_bytes;
-                printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
-            }
-            printf("\n");
-            
-            /* Group by type */
-            int stz_count = 0, phx_count = 0, phy_count = 0, plx_count = 0, ply_count = 0, bra_count = 0;
-            int ina_count = 0, dea_count = 0, tsb_count = 0, trb_count = 0, jmp_indx_count = 0, brs_count = 0;
-            
-            for (int i = 0; i < replacement_count; i++) {
-                replacement_t *r = &replacements[i];
-                if (strcmp(r->type, "STZ") == 0) stz_count++;
-                else if (strcmp(r->type, "PHX") == 0) phx_count++;
-                else if (strcmp(r->type, "PHY") == 0) phy_count++;
-                else if (strcmp(r->type, "PLX") == 0) plx_count++;
-                else if (strcmp(r->type, "PLY") == 0) ply_count++;
-                else if (strcmp(r->type, "BRA") == 0) bra_count++;
-                else if (strcmp(r->type, "INA") == 0) ina_count++;
-                else if (strcmp(r->type, "DEA") == 0) dea_count++;
-                else if (strcmp(r->type, "TSB") == 0) tsb_count++;
-                else if (strcmp(r->type, "TRB") == 0) trb_count++;
-                else if (strcmp(r->type, "JMP (abs,X)") == 0) jmp_indx_count++;
-                else if (strcmp(r->type, "BRS") == 0) brs_count++;
-            }
-            
-            if (bra_count > 0) printf("  BRA replacements: %d (from %d JMP instructions)\n", bra_count, total_jmp_count);
-            if (brs_count > 0) printf("  BRS replacements: %d (from %d JSR instructions) (NOTE: BRS opcode does not exist)\n", brs_count, total_jsr_count);
-            printf("\n");
-            
-            if (stz_count > 0) printf("  STZ replacements: %d\n", stz_count);
-            if (phx_count > 0) printf("  PHX replacements: %d\n", phx_count);
-            if (phy_count > 0) printf("  PHY replacements: %d\n", phy_count);
-            if (plx_count > 0) printf("  PLX replacements: %d\n", plx_count);
-            if (ply_count > 0) printf("  PLY replacements: %d\n", ply_count);
-            if (ina_count > 0) printf("  INA replacements: %d\n", ina_count);
-            if (dea_count > 0) printf("  DEA replacements: %d\n", dea_count);
-            if (tsb_count > 0) printf("  TSB replacements: %d\n", tsb_count);
-            if (trb_count > 0) printf("  TRB replacements: %d\n", trb_count);
-            if (jmp_indx_count > 0) printf("  JMP (abs,X) replacements: %d\n", jmp_indx_count);
-            
-            printf("========================================\n");
-        }
-        
-        /* Print optimization count summary */
-        if (optimization_count > 0) {
-            int total_bytes_saved = 0;
-            for (int i = 0; i < optimization_count; i++) {
-                total_bytes_saved += optimizations[i].bytes_saved;
-            }
-            
-            printf("\n=== Code Optimization ===\n");
-            printf("Total possible optimizations: %d\n", optimization_count);
-            printf("Total bytes saved: %d", total_bytes_saved);
-            if (total_opcode_bytes > 0) {
-                double percent = (double)total_bytes_saved * 100.0 / (double)total_opcode_bytes;
-                printf(" (%.1f%% of %d opcode bytes)", percent, total_opcode_bytes);
-            }
-            printf("\n");
-            
-            /* Group by type */
-            int inc_count = 0, dec_count = 0;
-            int tax_count = 0, tay_count = 0, branch_jmp_count = 0;
-            int redundant_count = 0, register_count = 0, load_store_count = 0;
-            for (int i = 0; i < optimization_count; i++) {
-                replacement_t *r = &optimizations[i];
-                if (strcmp(r->type, "INC") == 0) inc_count++;
-                else if (strcmp(r->type, "DEC") == 0) dec_count++;
-                else if (strcmp(r->type, "TAX") == 0) tax_count++;
-                else if (strcmp(r->type, "TAY") == 0) tay_count++;
-                else if (strcmp(r->type, "Branch+JMP") == 0) branch_jmp_count++;
-                else if (strcmp(r->type, "Redundant") == 0) redundant_count++;
-                else if (strcmp(r->type, "Register") == 0) register_count++;
-                else if (strcmp(r->type, "Load/Store") == 0) load_store_count++;
-            }
-            
-            if (inc_count > 0) printf("  INC optimizations: %d\n", inc_count);
-            if (dec_count > 0) printf("  DEC optimizations: %d\n", dec_count);
-            if (tax_count > 0) printf("  TAX optimizations: %d\n", tax_count);
-            if (tay_count > 0) printf("  TAY optimizations: %d\n", tay_count);
-            if (branch_jmp_count > 0) printf("  Branch+JMP optimizations: %d\n", branch_jmp_count);
-            if (redundant_count > 0) printf("  Redundant instruction removals: %d\n", redundant_count);
-            if (register_count > 0) printf("  Register transfer optimizations: %d\n", register_count);
-            if (load_store_count > 0) printf("  Load/Store optimizations: %d\n", load_store_count);
-            
-            printf("==========================\n");
-        }
+        print_binary_statistics(1);
+        print_opcode_statistics();
+        print_immediate_zero_statistics();
+        print_65CE02_replacement_opportunities(1, 0, 1);
+        print_code_optimization_summary();
     }
-    
+
     if (show_suggestions) {
-        if (replacement_count > 0) {
-            printf("\n=== 65C02 Replacement Suggestions ===\n");
-            for (int i = 0; i < replacement_count; i++) {
-                replacement_t *r = &replacements[i];
-                /* Skip BRS replacements in detailed section */
-                if (strcmp(r->type, "BRS") == 0) continue;
-                printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
-                if (strcmp(r->type, "BRA") == 0) {
-                    int16_t offset = (int16_t)(r->target_addr - (r->instr_addr + 2));
-                    printf("    Instruction address: $%04X, Target address: $%04X, Offset: %+d\n", 
-                           r->instr_addr, r->target_addr, offset);
-                }
-                printf("    Old: %s\n", r->old_code);
-                printf("    New: %s\n", r->new_code);
-            }
-            printf("======================================\n");
-        }
-        
-        if (optimization_count > 0) {
-            printf("\n=== Code Optimization Suggestions ===\n");
-            for (int i = 0; i < optimization_count; i++) {
-                replacement_t *r = &optimizations[i];
-                printf("  %s: %s:%d\n", r->type, r->filename, r->line_num);
-                printf("    Old: %s\n", r->old_code);
-                printf("    New: %s\n", r->new_code);
-            }
-            printf("=====================================\n");
-        }
+        print_65C02_replacement_suggestions();
+        print_code_optimization_suggestions();
     }
 }
 

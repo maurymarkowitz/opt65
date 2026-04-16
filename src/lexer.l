@@ -4,7 +4,6 @@
 #include <string.h>
 #include <stddef.h>  /* for size_t */
 #include "parser.tab.h"
-extern int reported_line;
 
 static int contains_non_ascii(const char *text) {
     for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
@@ -19,10 +18,9 @@ static int contains_non_ascii(const char *text) {
     do { \
         if (yytext[0] != '\n' && contains_non_ascii(yytext)) { \
             if (YY_START != COMMENT && yytext[0] != '\'') { \
-                fprintf(stderr, "Warning: Non-ASCII character in token at line %d, outside comment or string constant\n", reported_line); \
+                fprintf(stderr, "Warning: Non-ASCII character in token at line %d, outside comment or string constant\n", yylineno); \
             } \
         } \
-        if (yytext[0] != '\n') reported_line = yylineno; \
     } while (0);
 %}
 
@@ -121,13 +119,17 @@ static int contains_non_ascii(const char *text) {
 "BRA"   { return BRA; }
 "PHX"   { return PHX; }
 "PHY"   { return PHY; }
+"PHW"   { return PHW; }
 "PLX"   { return PLX; }
 "PLY"   { return PLY; }
+"INW"   { return INW; }
+"DEW"   { return DEW; }
 "STZ"   { return STZ; }
 "WAI"   { return WAI; }
 "STP"   { return STP; }
 "TRB"   { return TRB; }
 "TSB"   { return TSB; }
+"ASR"   { return ASR; }
 
  /* directives - must come before identifiers */
 "\.IF"|"IF"           { return IF; }
@@ -222,7 +224,7 @@ static int contains_non_ascii(const char *text) {
 
  /* catch-all */
 . {
-    fprintf(stderr, "Unknown character: '%c' at line %d\n", yytext[0], reported_line);
+    fprintf(stderr, "Unknown character: '%c' at line %d\n", yytext[0], yylineno);
 }
 
 <<EOF>> {
