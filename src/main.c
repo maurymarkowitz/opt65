@@ -33,7 +33,7 @@
 #include "stats.h"
 
 /** @brief Version string for opt65 */
-#define VERSION_STRING "1.1.0"
+#define VERSION_STRING "1.2.0"
 
 extern uint8_t output[65536];
 extern uint16_t pc;

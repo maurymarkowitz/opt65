@@ -3,7 +3,7 @@ opt65 Manual
 
 **Copyright © 2026 Maury Markowitz**
 
-Version 1.1.0
+Version 1.2.0
 
 [![GPL license](http://img.shields.io/badge/license-GPL-brightgreen.svg)](https://opensource.org/licenses/gpl-license)
 
