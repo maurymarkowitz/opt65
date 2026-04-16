@@ -5,6 +5,8 @@
 #include <stddef.h>  /* for size_t */
 #include "parser.tab.h"
 
+static int yycolumn = 1;
+
 static int contains_non_ascii(const char *text) {
     for (const unsigned char *p = (const unsigned char *)text; *p; p++) {
         if (*p >= 0x80) {
@@ -21,6 +23,7 @@ static int contains_non_ascii(const char *text) {
                 fprintf(stderr, "Warning: Non-ASCII character in token at line %d, outside comment or string constant\n", yylineno); \
             } \
         } \
+        yycolumn += yyleng; \
     } while (0);
 %}
 
@@ -36,7 +39,26 @@ static int contains_non_ascii(const char *text) {
  /* whitespace */
 [ \t]+                { /* ignore whitespace */ }
 
-\n                    { return NEWLINE; }
+[ \t]+[^\n]*        {
+                            int start_col = yycolumn - yyleng;
+                            int orig_len = yyleng;
+                            int wslen = 0;
+                            while (yytext[wslen] == ' ' || yytext[wslen] == '\t') {
+                                wslen++;
+                            }
+                            int tail = orig_len - wslen;
+                            if (tail > 0 && start_col + wslen > 27) {
+                                /* Fallback comment: ignore any text that starts after column 27 if preceded by whitespace. */
+                            } else {
+                                if (tail > 0) {
+                                    yyless(wslen);
+                                    yycolumn -= tail;
+                                }
+                                /* ignore whitespace */
+                            }
+                        }
+
+\n                    { yycolumn = 1; return NEWLINE; }
 
  /* ignore control characters: bell (0x07) and form feed (0x0C) */
 \007                  { /* ignore bell character */ }
@@ -45,7 +67,7 @@ static int contains_non_ascii(const char *text) {
  /* comment handling */
 <INITIAL,MACROBODY>";" { BEGIN(COMMENT); }
 <COMMENT>[^\n]*        { /* eat comment */ }
-<COMMENT>\n            { BEGIN(INITIAL); return NEWLINE; }
+<COMMENT>\n            { BEGIN(INITIAL); yycolumn = 1; return NEWLINE; }
 
  /* title directive is like a comment, we need to use a mode to catch 's */
  <INITIAL,MACROBODY>"\.TITLE"|"TITLE" { BEGIN(COMMENT); }
